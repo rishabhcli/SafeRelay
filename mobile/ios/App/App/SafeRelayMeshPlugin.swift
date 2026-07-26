@@ -1,5 +1,6 @@
 import Capacitor
 import CoreBluetooth
+import CoreLocation
 import OSLog
 import UIKit
 import UserNotifications
@@ -104,11 +105,10 @@ final class SafeRelayMeshService: NSObject {
     }
 
     func configureAtLaunch() {
-        guard isEnabled else { return }
         if let packet = latestPacket() {
             remember(packet)
         }
-        logger.notice("Restoring persisted mesh service at launch")
+        logger.notice("Starting always-on mesh service at launch")
         start()
     }
 
@@ -141,20 +141,6 @@ final class SafeRelayMeshService: NSObject {
             ]
         )
         logger.notice("Native mesh managers started")
-    }
-
-    func stop() {
-        defaults.set(false, forKey: enabledKey)
-        centralManager?.stopScan()
-        peripheralManager?.stopAdvertising()
-        connectedPeripherals.values.forEach {
-            centralManager?.cancelPeripheralConnection($0)
-        }
-        connectedPeripherals.removeAll()
-        peripheralManager?.removeAllServices()
-        localPacketCharacteristic = nil
-        serviceAdded = false
-        logger.notice("Native mesh service stopped")
     }
 
     func publish(_ data: Data) throws {
@@ -638,17 +624,61 @@ private extension CBManagerState {
     }
 }
 
+private final class SafeRelayCompassService: NSObject, CLLocationManagerDelegate {
+    static let shared = SafeRelayCompassService()
+
+    private let locationManager = CLLocationManager()
+    private(set) var isUpdating = false
+    var eventHandler: ((CLHeading) -> Void)?
+
+    override private init() {
+        super.init()
+        locationManager.delegate = self
+        locationManager.headingFilter = 1
+        locationManager.headingOrientation = .portrait
+    }
+
+    func start() throws {
+        guard CLLocationManager.headingAvailable() else {
+            throw NSError(
+                domain: "SafeRelayCompass",
+                code: 1,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Magnetic heading is unavailable on this device."
+                ]
+            )
+        }
+        isUpdating = true
+        locationManager.startUpdatingHeading()
+    }
+
+    func stop() {
+        locationManager.stopUpdatingHeading()
+        isUpdating = false
+    }
+
+    func locationManager(
+        _ manager: CLLocationManager,
+        didUpdateHeading newHeading: CLHeading
+    ) {
+        guard isUpdating, newHeading.headingAccuracy >= 0 else { return }
+        eventHandler?(newHeading)
+    }
+}
+
 @objc(SafeRelayNativeMeshPlugin)
 public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "SafeRelayNativeMeshPlugin"
     public let jsName = "SafeRelayNativeMesh"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "publish", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "drain", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "testNotification", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startCompass", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "stopCompass", returnType: CAPPluginReturnPromise),
     ]
 
     public override func load() {
@@ -657,6 +687,16 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
                 "packetReceived",
                 data: event.dictionary,
                 retainUntilConsumed: true
+            )
+        }
+        SafeRelayCompassService.shared.eventHandler = { [weak self] heading in
+            self?.notifyListeners(
+                "headingChanged",
+                data: [
+                    "heading": heading.magneticHeading,
+                    "accuracy": heading.headingAccuracy,
+                    "timestamp": heading.timestamp.timeIntervalSince1970,
+                ]
             )
         }
     }
@@ -672,11 +712,6 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }
-    }
-
-    @objc func stop(_ call: CAPPluginCall) {
-        SafeRelayMeshService.shared.stop()
-        call.resolve(statusDictionary())
     }
 
     @objc func status(_ call: CAPPluginCall) {
@@ -711,8 +746,15 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
                     userInfo: [NSLocalizedDescriptionKey: "Packet contains a non-numeric byte."]
                 )
             }
-            try SafeRelayMeshService.shared.publish(Data(bytes))
-            call.resolve(["published": true])
+            let service = SafeRelayMeshService.shared
+            try service.publish(Data(bytes))
+            call.resolve([
+                "published": true,
+                "persisted": true,
+                "connectedPeers": service.connectedPeerCount,
+                "scanning": service.isScanning,
+                "advertising": service.isAdvertising,
+            ])
         } catch {
             call.reject(error.localizedDescription)
         }
@@ -733,6 +775,26 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }
+    }
+
+    @objc func startCompass(_ call: CAPPluginCall) {
+        do {
+            try SafeRelayCompassService.shared.start()
+            call.resolve([
+                "active": true,
+                "message": "Live magnetic heading active.",
+            ])
+        } catch {
+            call.reject(error.localizedDescription)
+        }
+    }
+
+    @objc func stopCompass(_ call: CAPPluginCall) {
+        SafeRelayCompassService.shared.stop()
+        call.resolve([
+            "active": false,
+            "message": "Compass paused.",
+        ])
     }
 
     private func statusDictionary() -> [String: Any] {

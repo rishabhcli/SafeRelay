@@ -15,6 +15,7 @@
 		A11C4A112F12345600A1C4A0 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C4A102F12345600A1C4A0 /* SceneDelegate.swift */; };
 		A11C4A152F12345600A1C4A0 /* SafeRelayBridgeViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C4A142F12345600A1C4A0 /* SafeRelayBridgeViewController.swift */; };
 		A11C4A172F12345600A1C4A0 /* SafeRelayMeshPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C4A162F12345600A1C4A0 /* SafeRelayMeshPlugin.swift */; };
+		A11C4A192F12345600A1C4A0 /* SafeRelayNativeSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C4A182F12345600A1C4A0 /* SafeRelayNativeSettingsView.swift */; };
 		504EC30D1FED79650016851F /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30B1FED79650016851F /* Main.storyboard */; };
 		504EC30F1FED79650016851F /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 504EC30E1FED79650016851F /* Assets.xcassets */; };
 		504EC3121FED79650016851F /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 504EC3101FED79650016851F /* LaunchScreen.storyboard */; };
@@ -31,6 +32,7 @@
 		A11C4A102F12345600A1C4A0 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		A11C4A142F12345600A1C4A0 /* SafeRelayBridgeViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeRelayBridgeViewController.swift; sourceTree = "<group>"; };
 		A11C4A162F12345600A1C4A0 /* SafeRelayMeshPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeRelayMeshPlugin.swift; sourceTree = "<group>"; };
+		A11C4A182F12345600A1C4A0 /* SafeRelayNativeSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafeRelayNativeSettingsView.swift; sourceTree = "<group>"; };
 		504EC30C1FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		504EC30E1FED79650016851F /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		504EC3111FED79650016851F /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -78,6 +80,7 @@
 				A11C4A102F12345600A1C4A0 /* SceneDelegate.swift */,
 					A11C4A142F12345600A1C4A0 /* SafeRelayBridgeViewController.swift */,
 					A11C4A162F12345600A1C4A0 /* SafeRelayMeshPlugin.swift */,
+					A11C4A182F12345600A1C4A0 /* SafeRelayNativeSettingsView.swift */,
 				504EC30B1FED79650016851F /* Main.storyboard */,
 				504EC30E1FED79650016851F /* Assets.xcassets */,
 				504EC3101FED79650016851F /* LaunchScreen.storyboard */,
@@ -176,6 +179,7 @@
 				A11C4A112F12345600A1C4A0 /* SceneDelegate.swift in Sources */,
 					A11C4A152F12345600A1C4A0 /* SafeRelayBridgeViewController.swift in Sources */,
 					A11C4A172F12345600A1C4A0 /* SafeRelayMeshPlugin.swift in Sources */,
+					A11C4A192F12345600A1C4A0 /* SafeRelayNativeSettingsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

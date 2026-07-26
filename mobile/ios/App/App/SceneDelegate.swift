@@ -29,4 +29,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             restorationHandler: { _ in }
         )
     }
+
+    func sceneDidEnterBackground(_ scene: UIScene) {
+        SafeRelayBackgroundRefresh.schedule()
+    }
 }

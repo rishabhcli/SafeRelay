@@ -4,6 +4,10 @@
 <dict>
     <key>CAPACITOR_DEBUG</key>
 	<string>$(CAPACITOR_DEBUG)</string>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.development.saferelay.refresh</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
@@ -34,10 +38,13 @@
 	<string>SafeRelay uses your location to show your position on the incident map and attach coordinates when you create a field report.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>SafeRelay listens for local 15–20 kHz field signals only while you enable the ultrasonic receiver.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>SafeRelay uses device motion to show a live compass heading while the Compass tool is open.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>
 		<string>bluetooth-peripheral</string>
+		<string>fetch</string>
 	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
