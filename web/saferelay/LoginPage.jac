@@ -6,7 +6,7 @@ import from "@jac/runtime" {
     jacIsLoggedIn,
     jacLogin,
     jacSignup,
-    useNavigate,
+    navigate,
 }
 import from "lucide-react" {
     ArrowLeft,
@@ -26,8 +26,6 @@ def:pub LoginPage -> JsxElement {
         password_confirmation: str = "",
         busy: bool = False,
         error_message: str = "";
-
-    navigate = useNavigate();
 
     async def handle_submit(event: FormEvent) -> None {
         event.preventDefault();

@@ -1,6 +1,6 @@
 """Evidence-scoped SafeRelay operations surface with no generated live state."""
 
-import from "@jac/runtime" { Link, jacLogout, useNavigate }
+import from "@jac/runtime" { Link, jacLogout, navigate }
 import from "react" { useEffect }
 import from "mapbox-gl" {
     Map as MapboxMap,
@@ -141,8 +141,6 @@ def:pub VerifiedCommandCenter -> JsxElement {
     has notice: str = "";
     has notice_error: bool = False;
 
-    navigate = useNavigate();
-
     async can with entry {
         try {
             disaster_feed = await refresh_disaster_feed();
@@ -156,15 +154,19 @@ def:pub VerifiedCommandCenter -> JsxElement {
             }
         } except Exception {
             try {
-                disaster_feed = await get_disaster_feed();
-            } except Exception {}
-            if disaster_feed and disaster_feed.source_status in ["live", "partial"] {
-                notice = "";
-                notice_error = False;
-            } elif disaster_feed and disaster_feed.source_status == "cached" {
-                notice = "Public sources are unavailable. Previously verified records are shown as cached.";
-                notice_error = False;
-            } else {
+                fallback_feed: DisasterFeedView = await get_disaster_feed();
+                disaster_feed = fallback_feed;
+                if fallback_feed.source_status in ["live", "partial"] {
+                    notice = "";
+                    notice_error = False;
+                } elif fallback_feed.source_status == "cached" {
+                    notice = "Public sources are unavailable. Previously verified records are shown as cached.";
+                    notice_error = False;
+                } else {
+                    notice = "Public sources could not be reached. No replacement data was generated.";
+                    notice_error = True;
+                }
+            } except Exception {
                 notice = "Public sources could not be reached. No replacement data was generated.";
                 notice_error = True;
             }
