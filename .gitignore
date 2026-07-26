@@ -1,0 +1,6 @@
+.DS_Store
+**/.build/
+**/.jac/
+**/.pytest_cache/
+**/node_modules/
+**/dist/
