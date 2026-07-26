@@ -280,13 +280,14 @@ def:pub IncidentMap(
     return <section className="field-map mode-default" aria-label="Explorable incident map">
         <div ref={container_ref} className="field-map-canvas"></div>
         <div className="field-map-controls" role="group" aria-label="Map controls">
-            <button title="Zoom in" aria-label="Zoom in" onClick={zoom_in}>
+            <button id="map-zoom-in" title="Zoom in" aria-label="Zoom in" onClick={zoom_in}>
                 <ZoomIn size={20} />
             </button>
-            <button title="Zoom out" aria-label="Zoom out" onClick={zoom_out}>
+            <button id="map-zoom-out" title="Zoom out" aria-label="Zoom out" onClick={zoom_out}>
                 <ZoomOut size={20} />
             </button>
             <button
+                id="map-locate"
                 className={
                     "is-locating"
                     if locating
@@ -304,7 +305,7 @@ def:pub IncidentMap(
             >
                 {<LoaderCircle className="field-map-control-spinner" size={20} /> if locating else <LocateFixed size={20} />}
             </button>
-            <button title="Fit active signals" aria-label="Fit active signals" onClick={center_map}>
+            <button id="map-fit-signals" title="Fit active signals" aria-label="Fit active signals" onClick={center_map}>
                 <Crosshair size={20} />
             </button>
         </div>

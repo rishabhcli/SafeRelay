@@ -87,7 +87,7 @@ test "malformed packet header is rejected" {
 }
 
 
-test "newer sender sequence replaces stale local evidence" {
+test "newer safe packet replaces and stops the active sender distress" {
     first = fixture(1);
     other = SosPacket(
         user_id=99,
@@ -108,7 +108,9 @@ test "newer sender sequence replaces stale local evidence" {
     merged = replace_packet([first, other], newer);
     assert len(merged) == 2;
     assert merged[0].sequence == 43;
+    assert merged[0].status_code == 0;
     assert contains_packet(merged, newer.unique_id());
+    assert not contains_packet(merged, first.unique_id());
     assert contains_packet(merged, other.unique_id());
 }
 

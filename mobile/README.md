@@ -4,8 +4,8 @@ SafeRelay is an offline-first emergency packet relay written in Jac and
 packaged for iOS and Android with Jac's Capacitor mobile target.
 
 The first screen is the field application itself: device setup, command and
-evidence boards, local and disaster maps, offline tools, a guarded distress
-action, cloud receipt ledgers, responder handoff, and native systems
+evidence boards, local and disaster maps, offline tools, a one-tap SOS broadcast
+toggle, cloud receipt ledgers, responder handoff, and native systems
 diagnostics. The browser build is a truthful preview and does not simulate
 Bluetooth success. The runtime map shows only the device location and received
 mesh reports; operational values are source-backed or shown as unknown.

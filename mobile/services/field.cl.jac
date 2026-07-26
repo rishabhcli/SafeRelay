@@ -1,6 +1,6 @@
 """Online/offline field services implemented in Jac over native web APIs."""
 
-import from "@capacitor/core" { Capacitor, CapacitorHttp }
+import from "@capacitor/core" { Capacitor, CapacitorHttp, registerPlugin }
 import from .storage {
     DISASTER_CACHE_KEY,
     SYNC_ATTEMPTS_KEY,
@@ -19,7 +19,6 @@ glob CLOUD_RELAY_PREVIEW_COOKIE: str = str(__SAFERELAY_CLOUD_PREVIEW_COOKIE__); 
 
 glob _internet_failures: int = 0;
 glob _cloud_authorized: bool = False;
-glob _cloud_session_cookie: str = "";
 glob _last_disaster_fetch_ms: int = 0;
 glob _ultrasonic_context: any = None;  # jac:ignore[W1037]
 glob _ultrasonic_stream: any = None;  # jac:ignore[W1037]
@@ -28,6 +27,7 @@ glob _window: any = window;  # jac:ignore[W1037, W2001]
 glob _navigator: any = navigator;  # jac:ignore[W1037, W2001]
 glob _capacitor: any = Capacitor;  # jac:ignore[W1037]
 glob _http: any = CapacitorHttp;  # jac:ignore[W1037]
+glob _native_cloud: any = registerPlugin("SafeRelayNativeMesh");  # jac:ignore[W1037]
 
 
 def _now_ms -> int {
@@ -81,6 +81,9 @@ def _cloud_endpoint(path: str) -> str {
 
 
 async def _authorize_cloud {
+    if _capacitor.isNativePlatform() {
+        return;
+    }
     if _cloud_authorized { return; }
     if CLOUD_RELAY_PREVIEW_COOKIE.strip() {
         _cloud_authorized = True;
@@ -92,16 +95,6 @@ async def _authorize_cloud {
         + str(encodeURIComponent(CLOUD_RELAY_PREVIEW_TOKEN))  # jac:ignore[W2001]
         + "&embed=1&theme=dark"
     );
-    if _capacitor.isNativePlatform() {
-        response = await _http.get({
-            "url": auth_url,
-            "connectTimeout": 10000,
-            "readTimeout": 10000
-        });
-        _cloud_authorized = int(response.status) >= 200 and int(response.status) < 400;
-        _capture_cloud_cookie(response.headers);
-        return;
-    }
     response = await fetch(auth_url, {  # jac:ignore[W2001]
         "method": "GET",
         "credentials": "include",
@@ -111,32 +104,18 @@ async def _authorize_cloud {
 }
 
 
-def _capture_cloud_cookie(headers: any) {  # jac:ignore[W1037]
-    try {
-        raw_cookie = str(headers["set-cookie"] or headers["Set-Cookie"] or "");
-        if raw_cookie.strip() {
-            _cloud_session_cookie = raw_cookie.split(";")[0].strip();
-        }
-    } except Exception {}
-}
-
-
 async def _cloud_post(path: str, data: dict[str, object]) -> dict[str, object] {
     headers = {
         "Accept": "application/json",
         "Content-Type": "application/json"
     };
     if _capacitor.isNativePlatform() {
-        cookie = _cloud_session_cookie.strip() or CLOUD_RELAY_PREVIEW_COOKIE.strip();
-        if cookie {
-            headers["Cookie"] = cookie;
-        }
-        response = await _http.post({
-            "url": _cloud_endpoint(path),
-            "headers": headers,
-            "data": data,
-            "connectTimeout": 10000,
-            "readTimeout": 15000
+        response = await _native_cloud.cloudPost({
+            "baseUrl": CLOUD_RELAY_URL,
+            "path": path,
+            "previewToken": CLOUD_RELAY_PREVIEW_TOKEN,
+            "previewCookie": CLOUD_RELAY_PREVIEW_COOKIE,
+            "data": data
         });
         status = int(response.status);
         return {

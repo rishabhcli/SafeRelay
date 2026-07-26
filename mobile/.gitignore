@@ -9,7 +9,7 @@ artifacts/
 !.env.example
 
 # Capacitor native build products and local signing state
-.xcode-sonic-derived/
+.xcode-*-derived/
 android/.gradle/
 android/app/build/
 android/build/

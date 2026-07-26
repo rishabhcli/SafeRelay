@@ -205,10 +205,10 @@ def:pub AppShell -> JsxElement {
     has location_accuracy: float = 0.0;
     has location_message: str = "Location not sampled.";
     has selected_status: int = 1;
-    has distress_armed: bool = False;
+    has distress_active: bool = False;
     has distress_sending: bool = False;
     has distress_stage: str = "idle";
-    has distress_message: str = "Ready to create a device-local emergency packet.";
+    has distress_message: str = "Ready to start an SOS broadcast.";
     has distress_packet_id: str = "";
     has distress_saved: bool = False;
     has distress_radio_accepted: bool = False;
@@ -392,7 +392,7 @@ def:pub AppShell -> JsxElement {
             if lifecycle_data["isActive"] as bool {
                 await ensure_mesh_active();
                 await refresh_readiness();
-                await sync_cloud(False);
+                await sync_cloud(False, packets);
             }
             return;
         }
@@ -400,7 +400,7 @@ def:pub AppShell -> JsxElement {
             network_data = event["data"] as dict[str, object];
             if network_data["connected"] as bool {
                 network_state = "checking";
-                await sync_cloud(False);
+                await sync_cloud(False, packets);
             } else {
                 network_state = "offline";
                 cloud_message = "Jac cloud relay is unreachable; packets remain queued locally.";
@@ -452,7 +452,7 @@ def:pub AppShell -> JsxElement {
             if relay.should_relay() {
                 await publish_packet(packet_to_bytes(packet));
             }
-            await sync_cloud(False);
+            await sync_cloud(False, updated);
         } except Exception as error {
             append_log("Rejected malformed radio packet: " + str(error));
         }
@@ -496,69 +496,25 @@ def:pub AppShell -> JsxElement {
     }
 
     def choose_distress_status(status: int) {
-        if distress_sending { return; }
+        if distress_sending or distress_active { return; }
         selected_status = status;
-        distress_armed = False;
         distress_stage = "idle";
-        distress_message = "Ready to create a device-local emergency packet.";
+        distress_message = "Ready to start an SOS broadcast.";
         distress_packet_id = "";
         distress_saved = False;
         distress_radio_accepted = False;
         distress_peer_count = 0;
     }
 
-    async def send_selected_status {
+    async def toggle_distress_broadcast {
         distress_pulse_nonce += 1;
         if distress_sending { return; }
 
-        if not distress_armed {
-            distress_armed = True;
-            distress_stage = "armed";
-            distress_message = (
-                status_label(selected_status)
-                + " is armed. Tap the pulsing SOS button again to send."
-            );
-            show_alert(
-                "Distress action armed. Tap SOS again to send the radio packet.",
-                "warning"
-            );
-            await emergency_haptic();
-            if not location_ready {
-                distress_sending = True;
-                distress_stage = "locating";
-                distress_message = "Armed. Acquiring the packet position now.";
-                try {
-                    fix = await current_location();
-                    location_ready = fix.ready;
-                    latitude = fix.latitude;
-                    longitude = fix.longitude;
-                    location_accuracy = fix.accuracy;
-                    location_message = fix.message;
-                    distress_stage = "armed" if fix.ready else "blocked";
-                    distress_message = (
-                        "Position acquired. Tap SOS again to save and broadcast."
-                        if fix.ready
-                        else "Position is required before sending. " + fix.message
-                    );
-                    if not fix.ready {
-                        show_alert(distress_message, "danger");
-                    }
-                } except Exception as error {
-                    location_ready = False;
-                    location_message = "Location failed: " + str(error);
-                    distress_stage = "blocked";
-                    distress_message = (
-                        "Position is required before sending. " + location_message
-                    );
-                    show_alert(distress_message, "danger");
-                } finally {
-                    distress_sending = False;
-                }
-            }
-            return;
+        stopping = distress_active;
+        status_to_send = 0 if stopping else selected_status;
+        if not stopping {
+            distress_active = True;
         }
-
-        status_to_send = selected_status;
         distress_sending = True;
         distress_saved = False;
         distress_radio_accepted = False;
@@ -575,17 +531,28 @@ def:pub AppShell -> JsxElement {
                 location_message = fix.message;
             }
             if not location_ready {
+                if not stopping {
+                    distress_active = False;
+                }
                 distress_stage = "blocked";
                 distress_message = (
-                    "Packet was not created. A current position is required. "
-                    + location_message
-                );
+                    (
+                        "The SOS broadcast is still active. A saved position is "
+                        + "required to send its SAFE stop packet. "
+                    )
+                    if stopping
+                    else "The SOS broadcast did not start. A current position is required. "
+                ) + location_message;
                 show_alert(distress_message, "danger");
                 return;
             }
 
-            distress_stage = "saving";
-            distress_message = "Creating and saving the emergency packet on this device.";
+            distress_stage = "stopping" if stopping else "saving";
+            distress_message = (
+                "Creating the SAFE packet that stops this SOS broadcast."
+                if stopping
+                else "Creating and saving the emergency packet on this device."
+            );
             sequence = await next_sequence();
             packet = create_packet(
                 user_id,
@@ -602,7 +569,11 @@ def:pub AppShell -> JsxElement {
             distress_saved = True;
 
             distress_stage = "starting-radio";
-            distress_message = "Packet saved. Checking the native Bluetooth relay.";
+            distress_message = (
+                "SAFE packet saved. Checking the native Bluetooth relay."
+                if stopping
+                else "Packet saved. Checking the native Bluetooth relay."
+            );
             if not mesh_is_running() {
                 mesh_result = await start_mesh();
                 mesh_state = mesh_result.state;
@@ -612,18 +583,37 @@ def:pub AppShell -> JsxElement {
                 append_log(mesh_result.message);
             }
 
-            distress_stage = "broadcasting";
-            distress_message = "Packet saved. Handing it to the native Bluetooth relay.";
+            distress_stage = "stopping" if stopping else "broadcasting";
+            distress_message = (
+                "Sending the SAFE packet that stops this SOS broadcast."
+                if stopping
+                else "Packet saved. Handing it to the native Bluetooth relay."
+            );
             publish: PacketPublishState = await publish_packet_state(
                 packet_to_bytes(packet)
             );
             distress_radio_accepted = publish.accepted;
             distress_peer_count = publish.connected_peers;
-            distress_armed = False;
-            if publish.accepted {
+            if stopping {
+                distress_active = False;
+                if publish.accepted {
+                    distress_stage = "stopped";
+                    distress_message = (
+                        "SOS broadcast stopped. The SAFE packet was accepted by "
+                        + "the radio for nearby peers."
+                    );
+                } else {
+                    distress_stage = "stop-queued";
+                    distress_message = (
+                        "SOS broadcast stopped on this device. The SAFE packet is "
+                        + "saved for radio retry. "
+                        + publish.message
+                    );
+                }
+            } elif publish.accepted {
                 distress_stage = "accepted";
                 distress_message = (
-                    "Saved on device and accepted by the radio with "
+                    "SOS broadcast is active. The radio accepted the packet with "
                     + str(publish.connected_peers)
                     + (
                         " current peer link. Peer receipt is not yet confirmed."
@@ -634,14 +624,14 @@ def:pub AppShell -> JsxElement {
             } else {
                 distress_stage = "queued";
                 distress_message = (
-                    "Saved on device, but radio handoff was not accepted. "
+                    "SOS is active on this device, but radio handoff was not accepted. "
                     + publish.message
                     + " SafeRelay will retain the packet for retry."
                 );
             }
             show_alert(
                 distress_message,
-                "danger" if status_to_send != 0 else "success"
+                "success" if stopping else "danger"
             );
             append_log(
                 status_label(status_to_send)
@@ -652,7 +642,7 @@ def:pub AppShell -> JsxElement {
             );
             await emergency_haptic();
             try {
-                await sync_cloud(False);
+                await sync_cloud(False, updated);
             } except Exception as sync_error {
                 append_log(
                     "Cloud sync deferred after "
@@ -663,19 +653,34 @@ def:pub AppShell -> JsxElement {
             }
         } except Exception as error {
             if distress_saved {
-                distress_armed = False;
-                distress_stage = "queued";
-                distress_message = (
-                    "Packet "
-                    + distress_packet_id
-                    + " is saved on this device. Radio handoff failed: "
-                    + str(error)
-                );
+                distress_active = not stopping;
+                if stopping {
+                    distress_stage = "stop-queued";
+                    distress_message = (
+                        "SOS broadcast stopped on this device. SAFE packet "
+                        + distress_packet_id
+                        + " is saved for radio retry: "
+                        + str(error)
+                    );
+                } else {
+                    distress_stage = "queued";
+                    distress_message = (
+                        "Packet "
+                        + distress_packet_id
+                        + " is saved on this device. Radio handoff failed: "
+                        + str(error)
+                    );
+                }
             } else {
-                distress_armed = True;
+                distress_active = stopping;
                 distress_stage = "failed";
                 distress_message = (
-                    "Packet could not be saved. Tap again to retry: " + str(error)
+                    (
+                        "The SOS broadcast is still active. Tap again to stop it: "
+                        if stopping
+                        else "The SOS broadcast did not start. Tap to retry: "
+                    )
+                    + str(error)
                 );
             }
             show_alert(distress_message, "danger");
@@ -900,10 +905,6 @@ def:pub AppShell -> JsxElement {
         if announce { busy = False; }
     }
 
-    async def run_cloud_sync {
-        await sync_cloud(True);
-    }
-
     async def send_ultrasonic {
         try {
             result: any = await transmit_ultrasonic(  # jac:ignore[W1037]
@@ -1015,9 +1016,34 @@ def:pub AppShell -> JsxElement {
     }
 
     async can with entry {
-        user_id = await get_or_create_user_id();
+        loaded_user_id = await get_or_create_user_id();
+        user_id = loaded_user_id;
         loaded_packets = await load_packets();
         packets = loaded_packets;
+        restored_distress_bytes: list[int] = [];
+        restore_now = unix_seconds();
+        for saved_packet in loaded_packets {
+            if (
+                saved_packet.user_id == loaded_user_id
+                and saved_packet.status_code in [1, 2, 3, 4]
+                and not saved_packet.is_expired(restore_now)
+            ) {
+                restored_distress_bytes = packet_to_bytes(saved_packet);
+                selected_status = saved_packet.status_code;
+                distress_active = True;
+                distress_stage = "starting-radio";
+                distress_message = (
+                    "Restoring the active SOS broadcast from this device."
+                );
+                distress_packet_id = saved_packet.unique_id();
+                distress_saved = True;
+                location_ready = True;
+                latitude = saved_packet.latitude();
+                longitude = saved_packet.longitude();
+                location_accuracy = 0.0;
+                location_message = "Restored from the saved SOS packet.";
+            }
+        }
         onboarding_done = await load_onboarding_complete();
         battery_mode = await load_setting(BATTERY_KEY, "Bridge");
         loaded_theme = await load_setting(THEME_KEY, "System");
@@ -1041,6 +1067,31 @@ def:pub AppShell -> JsxElement {
         survival_chat = await load_survival_chat_history();
         if runtime_platform != "web" {
             await ensure_mesh_active();
+        }
+        if restored_distress_bytes {
+            restored_publish: PacketPublishState = await publish_packet_state(
+                restored_distress_bytes
+            );
+            distress_radio_accepted = restored_publish.accepted;
+            distress_peer_count = restored_publish.connected_peers;
+            distress_stage = "accepted" if restored_publish.accepted else "queued";
+            distress_message = (
+                (
+                    "SOS broadcast restored. The radio accepted the saved packet "
+                    + "with "
+                    + str(restored_publish.connected_peers)
+                    + (
+                        " current peer link."
+                        if restored_publish.connected_peers == 1
+                        else " current peer links."
+                    )
+                )
+                if restored_publish.accepted
+                else (
+                    "SOS remains active on this device. Radio retry is queued. "
+                    + restored_publish.message
+                )
+            );
         }
         await check_reachability(loaded_packets);
         register_app_state_observer();
@@ -1067,11 +1118,14 @@ def:pub AppShell -> JsxElement {
     }, []);
 
     useEffect(lambda {
-        reachability_timer = setInterval(lambda { check_reachability(); }, 60000);
+        reachability_timer = setInterval(
+            lambda { check_reachability(packets); },
+            15000
+        );
         return lambda {
             clearInterval(reachability_timer);
         };
-    }, [mesh_state, platform_name]);
+    }, [mesh_state, platform_name, packets, user_id]);
 
     useEffect(lambda {
         transcript: any = document.querySelector(".survival-transcript");  # jac:ignore[W1037]
@@ -1092,6 +1146,14 @@ def:pub AppShell -> JsxElement {
 
     useEffect(lambda {
         window.scrollTo(0, 0);  # jac:ignore[W2001]
+        if active_tab == "settings" {
+            settings_scroller: any = document.querySelector(  # jac:ignore[W1037]
+                ".app-content:has(.settings-panel)"
+            );
+            if settings_scroller {
+                settings_scroller.scrollTop = 0;
+            }
+        }
     }, [active_tab]);
 
     now = unix_seconds();
@@ -1127,20 +1189,26 @@ def:pub AppShell -> JsxElement {
         if distress_stage == "locating"
         else "Saving on device"
         if distress_stage == "saving"
+        else "Stopping SOS broadcast"
+        if distress_stage == "stopping"
         else "Starting Bluetooth relay"
         if distress_stage == "starting-radio"
         else "Broadcasting packet"
         if distress_stage == "broadcasting"
-        else "Packet accepted by radio"
+        else "SOS broadcast active"
         if distress_stage == "accepted"
-        else "Packet retained for retry"
+        else "SOS active, radio retry queued"
         if distress_stage == "queued"
+        else "SOS broadcast stopped"
+        if distress_stage == "stopped"
+        else "Stop packet retained for retry"
+        if distress_stage == "stop-queued"
         else "Position unavailable"
         if distress_stage == "blocked"
         else "Send needs attention"
         if distress_stage == "failed"
-        else "Distress action armed"
-        if distress_armed
+        else "SOS broadcast active"
+        if distress_active
         else ""
     );
     distress_button_label = (
@@ -1148,15 +1216,17 @@ def:pub AppShell -> JsxElement {
         if distress_stage == "locating"
         else "SAVING ON DEVICE"
         if distress_stage == "saving"
+        else "STOPPING BROADCAST"
+        if distress_stage == "stopping"
         else "STARTING RADIO"
         if distress_stage == "starting-radio"
         else "BROADCASTING"
         if distress_stage == "broadcasting"
-        else "RETRY RADIO PACKET"
+        else "STOP BROADCAST"
+        if distress_active
+        else "RETRY SOS BROADCAST"
         if distress_stage == "blocked" or distress_stage == "failed"
-        else "CONFIRM RADIO PACKET"
-        if distress_armed
-        else "ARM DISTRESS ACTION"
+        else "START SOS BROADCAST"
     );
     compass_direction = (
         "N"
@@ -1570,7 +1640,7 @@ def:pub AppShell -> JsxElement {
                         aria-checked={selected_status == 1}
                         aria-label="Rescue, immediate danger"
                         onClick={lambda { choose_distress_status(1); }}
-                        disabled={distress_sending}
+                        disabled={distress_sending or distress_active}
                     >
                         <span className="status-icon"><Siren size={21} /></span>
                         <strong>RESCUE</strong>
@@ -1582,7 +1652,7 @@ def:pub AppShell -> JsxElement {
                         aria-checked={selected_status == 2}
                         aria-label="Medical, urgent care"
                         onClick={lambda { choose_distress_status(2); }}
-                        disabled={distress_sending}
+                        disabled={distress_sending or distress_active}
                     >
                         <span className="status-icon"><HeartPulse size={21} /></span>
                         <strong>MEDICAL</strong>
@@ -1594,7 +1664,7 @@ def:pub AppShell -> JsxElement {
                         aria-checked={selected_status == 3}
                         aria-label="Trapped, pinned or blocked"
                         onClick={lambda { choose_distress_status(3); }}
-                        disabled={distress_sending}
+                        disabled={distress_sending or distress_active}
                     >
                         <span className="status-icon"><TriangleAlert size={21} /></span>
                         <strong>TRAPPED</strong>
@@ -1606,7 +1676,7 @@ def:pub AppShell -> JsxElement {
                         aria-checked={selected_status == 4}
                         aria-label="Supplies, water or food"
                         onClick={lambda { choose_distress_status(4); }}
-                        disabled={distress_sending}
+                        disabled={distress_sending or distress_active}
                     >
                         <span className="status-icon"><PackageOpen size={21} /></span>
                         <strong>SUPPLIES</strong>
@@ -1631,18 +1701,18 @@ def:pub AppShell -> JsxElement {
                     id="distress-command"
                     className={
                         "distress-command status-" + str(selected_status)
-                        + (" armed" if distress_armed else "")
+                        + (" active" if distress_active else "")
                         + (" working" if distress_sending else "")
                     }
-                    onClick={send_selected_status}
+                    onClick={toggle_distress_broadcast}
                     disabled={distress_sending}
                     data-state={distress_stage}
                     data-message={distress_message}
                     aria-label={
                         (
-                            "Send " + status_label(selected_status) + " radio packet"
-                            if distress_armed
-                            else "Arm " + status_label(selected_status) + " distress action"
+                            "Stop active SOS broadcast"
+                            if distress_active
+                            else "Start " + status_label(selected_status) + " SOS broadcast"
                         )
                     }
                 >
@@ -1658,7 +1728,7 @@ def:pub AppShell -> JsxElement {
                     </span>
                 </button>
 
-                {if distress_stage != "idle" or distress_armed {
+                {if distress_stage != "idle" or distress_active {
                     <section
                         className={"distress-state " + distress_stage}
                         role="status"
@@ -1667,11 +1737,11 @@ def:pub AppShell -> JsxElement {
                     >
                         <span className={
                             "active"
-                            if distress_stage == "accepted"
+                            if distress_active and not distress_sending
                             else "working"
                             if distress_sending
                             else "warning"
-                            if distress_stage in ["blocked", "queued", "failed"]
+                            if distress_stage in ["blocked", "queued", "stop-queued", "failed"]
                             else ""
                         }></span>
                         <div>
@@ -1850,10 +1920,14 @@ def:pub AppShell -> JsxElement {
                     <div className="settings-section-title">
                         <span>CLOUD SYNC</span>
                     </div>
-                    <button id="settings-sync" className="settings-row settings-row-button" onClick={run_cloud_sync} disabled={busy}>
+                    <div id="settings-sync" className="settings-row settings-status-row">
                         <span className="settings-icon"><UploadCloud size={19} /></span>
-                        <div><strong>Retry Cloud Upload</strong><small>{str(queue.queued) + " queued · " + str(len(sync_receipts)) + " receipts"}</small></div>
-                    </button>
+                        <div>
+                            <strong>{"Cloud queue clear" if queue.queued == 0 else "Automatic upload pending"}</strong>
+                            <small>{str(queue.queued) + " queued · retries every 15 seconds · " + str(len(sync_receipts)) + " receipts"}</small>
+                        </div>
+                        <span className={"status-dot ready" if network_state == "online" and queue.queued == 0 else "status-dot"}></span>
+                    </div>
                 </section>
 
                 <section className="settings-section">
