@@ -6,11 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Monorepo holding **two independent Jac 0.34.7 applications** that share no build,
 package manager, or persistence layer. Run every command from inside the relevant
-app directory — there is no root-level build.
+app directory — there is no root-level build. The top-level `design/` directory
+holds icon-composer source art (SVG/PNG layers plus a `build_layers.mjs` helper)
+and is **not** a Jac app — see the Jac-rule note below.
 
 | App | Path | Kind | Purpose |
 | --- | --- | --- | --- |
-| Web | `web/` | `web-app` | Graph-native emergency-drill operations console (simulated exercise) |
+| Web | `web/` | `web-app` | Evidence-scoped console monitoring source-backed public hazard feeds (USGS/NWS) plus mobile relay ingest — never fabricates operational records |
 | Mobile | `mobile/` | `mobile` | Offline-first BLE packet relay, packaged for iOS/Android via Capacitor |
 
 ## The one hard rule: everything stays in Jac
@@ -20,11 +22,18 @@ abilities, tests, routes, and JSX-like client components. **Do not add JavaScrip
 TypeScript, Python, handwritten API routes, or a second persistence layer.** Model
 work with Jac primitives instead:
 
-- **Graph nodes + edges + walkers** for topology and traversal (e.g. `TraceRelay`).
+- **Graph nodes + edges + walkers** for topology and traversal.
 - **`def:protect` typed functions** for authenticated, client-callable RPC. Jac auth
   maps each operator to a private persistent root graph; the graph *is* the database.
-- **`by llm()`** only for structured agent output, and always with a deterministic
-  Jac fallback so the app runs with no model provider configured.
+- **LLM output** only when structured, and always with a deterministic Jac fallback
+  so the app runs with no model provider configured — this applies both to `by llm()`
+  (cloud) and to the mobile on-device Apple Foundation Models bridge
+  (`services/foundation_models.cl.jac`, which degrades to a deterministic reply off
+  iOS/Apple Intelligence).
+
+The only sanctioned non-Jac code is the generated Capacitor native shell
+(`mobile/android/`, `mobile/ios/` — Swift only, see below) and the `design/` icon
+tooling. Do not add JS/TS/Python anywhere else.
 
 Before editing any `.jac` file, read the relevant compiler guide: `jac guide <name>`.
 
@@ -45,10 +54,12 @@ jac test saferelay/store_test.jac   # single test file
 jac build main.jac
 # Preflight (CI gate): jac check . && jac test && jac build main.jac
 ```
-The live `by llm()` agent is **off by default**. Enable it with
-`SAFERELAY_LIVE_AGENT=true`, `BYLLM_DEFAULT_MODEL=<model>`, and the matching
-provider key (`OPENAI_API_KEY` / `ANTHROPIC_API_KEY` / `GOOGLE_API_KEY`). Otherwise
-the typed deterministic briefing is used. See `web/.env.example`.
+`MAPBOX_ACCESS_TOKEN` is optional — the incident map falls back to the public token
+baked into `jac.toml`'s `[client.vite.define]`; set your own to avoid drawing on that
+account's quota. The `SAFERELAY_LIVE_AGENT` / `BYLLM_*` / provider-key variables and
+the `[byllm.model]` block remain scaffolded in `web/.env.example` and `jac.toml`, but
+no `by llm()` call is currently wired into the web backend — the deterministic
+hazard-feed path is the only path. See `web/.env.example`.
 
 ### mobile/
 ```sh
@@ -65,16 +76,24 @@ jac build --client mobile --platform ios       # needs full Xcode on macOS
 ## Architecture
 
 ### web/ — one graph, one runtime
-`saferelay/store.jac` is the whole backend: it declares the graph nodes (`Incident`
-→ `Alert` → `RelayHop`, plus `Responder`, `ActivityEvent`, `ScenarioPreset`, frozen
-run artifacts, reviews, handoffs), the 24 `def:protect` RPCs, the `TraceRelay`
-walker, the `by llm()` agent, and all domain logic. `main.jac` re-exports each RPC
-as a thin `def:priv` wrapper and mounts the client via a `cl { ... }` block. Client
-UI lives in `saferelay/*.jac` (`AppShell`, `LandingPage`, `LoginPage`,
-`CommandCenter`). Parity tests are `saferelay/store_test.jac`.
+`saferelay/store.jac` is the whole backend: it declares the graph nodes
+(`DisasterCache` → `DisasterEvent` via the `DisasterCacheEvent` edge, plus
+`MobileRelaySignal`), the typed view objects, and the domain logic that pulls live
+USGS earthquake and NWS severe-weather records over `urllib.request` with bounded
+timeouts. It never fabricates operational records — a failed refresh keeps the
+verified cache or reports unavailable. Protected RPCs are `get_disaster_feed` and
+`refresh_disaster_feed`; public entry points `cloud_relay_health` and
+`ingest_mobile_signal` accept relay reports from the mobile app. `main.jac`
+re-exports these as thin `def:pub`/`def:priv` wrappers and mounts the client via a
+`cl { ... }` block. Client UI lives in `saferelay/*.jac` (`AppShell` router,
+`LandingPage`, `LoginPage`, and `VerifiedCommandCenter` — the evidence monitor at
+`/ops`). Evidence-boundary tests are `saferelay/store_test.jac`. The former drill
+engine (Incident/Alert/RelayHop topology, the `TraceRelay` walker, the `by llm()`
+briefing agent, and the 24-RPC console) has been removed.
 
 > The web app's real code is all under `saferelay/` (+ `styles/`). The `app/`,
-> `components/`, `lib/`, `hooks/`, `supabase/` directories are currently empty.
+> `components/`, `lib/`, `hooks/`, `supabase/` directories hold only empty
+> placeholder subfolders (no Jac code).
 
 ### mobile/ — dual client/server compilation
 Jac compiles server and client variants into separate codespaces, so each domain
@@ -88,12 +107,21 @@ To avoid duplicate declarations during whole-project `jac check`, **client symbo
 are prefixed `Client`/`CLIENT_`** (e.g. `SosPacket` ↔ `ClientSosPacket`,
 `PACKET_SIZE` ↔ `CLIENT_PACKET_SIZE`). The two variants must be kept algorithmically
 equivalent. Layout: `domain/` = protocol + operations logic, `services/` = Capacitor
-device/data bindings (BLE mesh, storage, field feeds, handoff transfer),
-`components/` = UI, `tests/` = protocol + operations tests. See `docs/ARCHITECTURE.md`.
+device/data bindings (BLE mesh, storage, field feeds, handoff transfer, and the
+Apple Foundation Models bridge `foundation_models.cl.jac`), `components/` = UI
+(`AppShell.cl.jac` plus the Mapbox `IncidentMap.cl.jac`), `tests/` = protocol +
+operations tests. The client also depends on `mapbox-gl`; `MAPBOX_ACCESS_TOKEN` is
+optional (`jac.toml` bakes a public fallback token). See `docs/ARCHITECTURE.md`.
 
 `android/` and `ios/` are generated Capacitor shells (`jac setup mobile`) — no
 Flutter/Dart. Touch them only for a native service, entitlement, permission, or
-plugin bridge. App id: `com.development.saferelay`.
+plugin bridge. The iOS shell now carries hand-written Swift bridges under
+`ios/App/App/`: `SafeRelayMeshPlugin` (CoreBluetooth central/peripheral relay),
+`SafeRelayFoundationModelsPlugin` (on-device Apple Intelligence), and
+`SafeRelayBridgeViewController` + `SafeRelayNativeSettingsView` (native tab-bar
+chrome), wired at launch from `AppDelegate`. `LocalNotifications` (configured in
+`capacitor.config.json`) surfaces foreign-distress alerts. App id:
+`com.development.saferelay`.
 
 ## Conventions
 
@@ -106,11 +134,15 @@ plugin bridge. App id: `com.development.saferelay`.
 
 ## Evidence boundary (mobile BLE)
 
-A generated shell, passing codec tests, a browser preview, or an installed APK **do
-not prove phone-to-phone BLE behavior.** Do not claim native radio support until
-central scanning, peripheral advertising, background continuity, packet receipt, and
-relay have been validated on two physical devices. Responder receipt and rescue
-outcome are never inferred from a local broadcast.
+A generated shell, passing codec tests, a browser preview, an installed APK, or the
+mere presence of `SafeRelayMeshPlugin.swift` **do not prove phone-to-phone BLE
+behavior.** Do not claim native radio support until central scanning, peripheral
+advertising, background continuity, packet receipt, and relay have been validated on
+two physical devices. Responder receipt and rescue outcome are never inferred from a
+local broadcast. Per `AGENTS.md`, run and interactively test the mobile app only on
+physically connected Apple-Intelligence-capable iPhones (iOS 27) via Device Hub —
+never a simulator, emulator, iPad, or browser preview; if fewer than two qualifying
+iPhones are connected, report BLE relay validation as blocked.
 
 ## License
 

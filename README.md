@@ -22,9 +22,10 @@ the platform bridges and entitlements that Capacitor cannot express directly.
 ```mermaid
 flowchart LR
     PERSON["Person in distress"] --> PHONE_A["SafeRelay field app"]
-    PHONE_A -->|"Validated relay packet"| PHONE_B["Nearby SafeRelay device"]
-    PHONE_B -->|"Store and forward"| CONNECTED["Connected relay device"]
-    CONNECTED --> CONSOLE["SafeRelay operations console"]
+    PHONE_A -->|"Always-on Bluetooth relay"| PHONE_B["Nearby SafeRelay device"]
+    PHONE_A -->|"Automatic upload when reachable"| CLOUD["Jac cloud relay"]
+    PHONE_B -->|"Store, forward, and upload when reachable"| CLOUD
+    CLOUD --> CONSOLE["SafeRelay operations console"]
     USGS["USGS earthquakes"] --> CONSOLE
     NWS["NWS severe weather"] --> CONSOLE
 ```
@@ -38,6 +39,7 @@ clearly labeled map layers and are excluded from evidence counts.
 
 - Jac 0.34.7 for application logic, graph state, protocol policy, tests, and UI
 - Typed protected Jac functions for authenticated web RPC
+- Typed public Jac ingestion for idempotent mobile cloud receipts
 - Per-operator Jac root graphs for isolated console state
 - Capacitor 8 for the native mobile shell
 - CoreBluetooth for the iOS central and peripheral bridge
@@ -73,6 +75,7 @@ cd mobile
 jac install
 bun install
 cp -n .env.example .env
+# Set SAFERELAY_CLOUD_URL in .env to the public JacHammer deployment origin.
 jac check .
 jac test tests/protocol_tests.jac tests/operations_tests.jac -v
 jac build --client mobile --platform ios

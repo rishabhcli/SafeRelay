@@ -2,14 +2,19 @@
 
 ## Project Structure & Module Organization
 
-SafeRelay contains two independent Jac applications. `web/` is the graph-native
-operations console: `saferelay/` holds client components, graph/domain logic,
-and `store_test.jac`; `styles/` contains its UI styles. `mobile/` is the
-offline-first field relay: `domain/` defines protocol and operations logic,
-`services/` wraps device and data integrations, `components/` contains the
-mobile UI, and `tests/` covers protocol and operations behavior. Native
-Capacitor projects live in `mobile/android/` and `mobile/ios/`; modify them
-only for platform bridge or entitlement work.
+SafeRelay contains two independent Jac applications plus a `design/` directory of
+icon-composer source art (SVG/PNG layers and a `build_layers.mjs` helper; not a
+Jac app). `web/` is the evidence-scoped operations console that monitors
+source-backed public hazard feeds (USGS/NWS) and ingests mobile relay reports:
+`saferelay/` holds client components, graph/domain logic, and `store_test.jac`;
+`styles/` contains its UI styles. `mobile/` is the offline-first field relay:
+`domain/` defines protocol and operations logic, `services/` wraps device and data
+integrations (BLE mesh, storage, field feeds, handoff, and the Apple Foundation
+Models bridge), `components/` contains the mobile UI (including the Mapbox
+`IncidentMap`), and `tests/` covers protocol and operations behavior. Native
+Capacitor projects live in `mobile/android/` and `mobile/ios/`; modify them only
+for platform bridge or entitlement work (the iOS shell carries the hand-written
+CoreBluetooth mesh, Foundation Models, and native-tab Swift plugins).
 
 ## Build, Test, and Development Commands
 
@@ -57,8 +62,7 @@ iPhones before claiming native radio support.
 
 ## Commit & Pull Request Guidelines
 
-The visible history currently has only the baseline `Create README.md` commit,
-so use concise, imperative subjects such as `Add relay packet validation`.
+Use concise, imperative commit subjects such as `Add relay packet validation`.
 Keep commits scoped to one application or native bridge concern. Pull requests
 should describe the changed workflow, list validation commands, link relevant
 issues, and include screenshots for web or mobile UI changes. Never commit

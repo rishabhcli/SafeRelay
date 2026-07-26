@@ -112,7 +112,10 @@ trees never enter the hosted web build context.
 7. Configure a custom domain only after the platform URL passes all checks.
 
 Restart Preview after changing environment values so the Jac process receives
-the new configuration.
+the new configuration. JacHammer preview and sandbox URLs can be protected by
+the platform's preview token even when Jac endpoints are marked public. Do not
+configure `SAFERELAY_CLOUD_URL` with a URL that returns `401` to an anonymous
+health probe; the mobile relay requires the permanent public deployment origin.
 
 ## Release Acceptance
 
