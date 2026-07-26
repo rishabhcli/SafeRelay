@@ -40,6 +40,12 @@
 	<string>SafeRelay listens for local 15–20 kHz field signals only while you enable the ultrasonic receiver.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>SafeRelay uses device motion to show a live compass heading while the Compass tool is open.</string>
+	<key>SafeRelayCloudPreviewCookie</key>
+	<string>$(SAFERELAY_CLOUD_PREVIEW_COOKIE)</string>
+	<key>SafeRelayCloudPreviewToken</key>
+	<string>$(SAFERELAY_CLOUD_PREVIEW_TOKEN)</string>
+	<key>SafeRelayCloudURL</key>
+	<string>$(SAFERELAY_CLOUD_URL)</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-central</string>

@@ -6,7 +6,6 @@ final class SafeRelaySettingsModel: ObservableObject {
     @Published var meshActive = false
     @Published var busy = false
     @Published var meshMessage = "Mesh relay has not been started."
-    @Published var privacyMode = "Relay Only"
     @Published var batteryMode = "Bridge"
     @Published var themeMode = "System"
     @Published var autoDownloadMaps = true
@@ -64,7 +63,6 @@ final class SafeRelaySettingsModel: ObservableObject {
         meshActive = values.bool("meshActive", fallback: meshActive)
         busy = values.bool("busy", fallback: busy)
         meshMessage = values.string("meshMessage", fallback: meshMessage)
-        privacyMode = values.string("privacyMode", fallback: privacyMode)
         batteryMode = values.string("batteryMode", fallback: batteryMode)
         themeMode = values.string("themeMode", fallback: themeMode)
         autoDownloadMaps = values.bool(
@@ -203,34 +201,23 @@ struct SafeRelayNativeSettingsView: View {
                         )
 
                     Section {
-                        Picker("Privacy bridge", selection: privacyBinding) {
-                            Text("Local").tag("Local Only")
-                            Text("Relay").tag("Relay Only")
-                            Text("Cloud").tag("Cloud Bridge")
-                        }
-                        .pickerStyle(.segmented)
-
                         LabeledContent("Bluetooth relay") {
-                            Text(model.privacyMode == "Local Only" ? "Blocked" : "Allowed")
-                                .foregroundStyle(
-                                    model.privacyMode == "Local Only"
-                                        ? Color.secondary
-                                        : Color.green
-                                )
+                            Text("Always active")
+                                .foregroundStyle(Color.green)
                         }
                         LabeledContent("Cloud upload") {
-                            Text(model.privacyMode == "Cloud Bridge" ? "Allowed" : "Blocked")
-                                .foregroundStyle(
-                                    model.privacyMode == "Cloud Bridge"
-                                        ? Color.green
-                                        : Color.secondary
-                                )
+                            Text("Automatic")
+                                .foregroundStyle(Color.green)
                         }
                         LabeledContent("Pending sync", value: "\(model.queuedPackets) packets")
                     } header: {
-                        Text("Privacy and Bridge Mode")
+                        Text("Connectivity")
                     } footer: {
-                        Text(privacyDescription)
+                        Text(
+                            "SafeRelay always listens and relays over nearby Bluetooth. "
+                            + "Every queued signal uploads automatically whenever the "
+                            + "Jac cloud relay is reachable."
+                        )
                     }
 
                     Section("Display") {
@@ -345,11 +332,6 @@ struct SafeRelayNativeSettingsView: View {
                             "Auto-activate on disaster",
                             systemImage: "exclamationmark.triangle",
                             isOn: autoActivateBinding
-                        )
-                        Toggle(
-                            "Auto-upload when online",
-                            systemImage: "icloud.and.arrow.up",
-                            isOn: autoUploadBinding
                         )
                         Toggle(
                             "Show notifications",
@@ -502,20 +484,12 @@ struct SafeRelayNativeSettingsView: View {
                 }
 
                 HStack(spacing: 12) {
-                    Button {
-                        performAction("settings-mesh-toggle")
-                    } label: {
-                        Label(
-                            model.meshActive ? "Stop Mesh" : "Start Mesh",
-                            systemImage: model.meshActive
-                                ? "stop.fill"
-                                : "antenna.radiowaves.left.and.right"
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.glassProminent)
-                    .tint(model.meshActive ? .orange : .blue)
-                    .disabled(model.busy)
+                    Label(
+                        model.meshActive ? "Bluetooth relay active" : "Starting Bluetooth relay",
+                        systemImage: "antenna.radiowaves.left.and.right"
+                    )
+                    .frame(maxWidth: .infinity)
+                    .foregroundStyle(model.meshActive ? Color.green : Color.orange)
 
                     Button {
                         performAction("settings-refresh")
@@ -559,35 +533,9 @@ struct SafeRelayNativeSettingsView: View {
 
     private var howItWorksDescription: String {
         "SafeRelay stores SOS packets on this iPhone, relays eligible packets "
-            + "over nearby Bluetooth, and uploads received packets only when "
-            + "Cloud Bridge is enabled and internet is reachable. A local send "
+            + "over nearby Bluetooth at all times, and automatically uploads "
+            + "queued packets whenever the Jac cloud relay is reachable. A local send "
             + "or cloud receipt is not responder confirmation."
-    }
-
-    private var privacyDescription: String {
-        switch model.privacyMode {
-        case "Local Only":
-            return "Packets stay on this phone. Nearby relay and cloud upload are blocked."
-        case "Cloud Bridge":
-            return "Nearby relay is allowed. Received packets may upload when internet returns."
-        default:
-            return "Nearby Bluetooth relay is allowed while cloud upload stays disabled."
-        }
-    }
-
-    private var privacyBinding: Binding<String> {
-        Binding(
-            get: { model.privacyMode },
-            set: { value in
-                model.privacyMode = value
-                let action = switch value {
-                case "Local Only": "settings-privacy-local"
-                case "Cloud Bridge": "settings-privacy-cloud"
-                default: "settings-privacy-relay"
-                }
-                performAction(action)
-            }
-        )
     }
 
     private var themeBinding: Binding<String> {
@@ -637,16 +585,6 @@ struct SafeRelayNativeSettingsView: View {
             set: { value in
                 model.autoActivate = value
                 performAction("settings-auto-activate")
-            }
-        )
-    }
-
-    private var autoUploadBinding: Binding<Bool> {
-        Binding(
-            get: { model.privacyMode == "Cloud Bridge" },
-            set: { value in
-                model.privacyMode = value ? "Cloud Bridge" : "Relay Only"
-                performAction("settings-auto-upload")
             }
         )
     }
