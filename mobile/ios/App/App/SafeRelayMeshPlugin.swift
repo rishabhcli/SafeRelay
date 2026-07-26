@@ -1,12 +1,49 @@
 import Capacitor
 import CoreBluetooth
 import CoreLocation
+import Foundation
+import Network
 import OSLog
 import UIKit
 import UserNotifications
 
 private let meshServiceUUID = CBUUID(string: "12345678-1234-1234-1234-123456789ABC")
 private let meshPacketUUID = CBUUID(string: "12345678-1234-1234-1234-123456789ABD")
+private let distressNotificationCategory = "SAFERELAY_DISTRESS"
+private let viewIncidentAction = "SAFERELAY_VIEW_INCIDENT"
+
+private struct PendingCloudSignal: Codable {
+    let messageID: String
+    let originDeviceID: String
+    let latitude: Double
+    let longitude: Double
+    let statusCode: Int
+    let packetTimestamp: UInt32
+    let rssi: Int
+    let deliveredBy: String
+    let hopCount: Int
+    let queuedAt: Date
+
+    var payload: [String: Any] {
+        [
+            "message_id": messageID,
+            "origin_device_id": originDeviceID,
+            "latitude": latitude,
+            "longitude": longitude,
+            "status_code": statusCode,
+            "packet_timestamp": Int(packetTimestamp),
+            "rssi": rssi,
+            "delivered_by": deliveredBy,
+            "hop_count": hopCount,
+        ]
+    }
+}
+
+private struct CloudRelayConfiguration {
+    let baseURL: URL
+    let previewToken: String
+    let previewCookie: String
+}
 
 private struct MeshPacketEvent {
     let bytes: [UInt8]
@@ -33,6 +70,56 @@ private enum MeshPacket {
         return "\(user)-\(sequence)"
     }
 
+    private static func unsignedInteger(_ data: Data, at offset: Int) -> UInt32 {
+        UInt32(data[offset]) << 24
+            | UInt32(data[offset + 1]) << 16
+            | UInt32(data[offset + 2]) << 8
+            | UInt32(data[offset + 3])
+    }
+
+    private static func signedInteger(_ data: Data, at offset: Int) -> Int32 {
+        Int32(bitPattern: unsignedInteger(data, at: offset))
+    }
+
+    static func notificationUserInfo(_ data: Data) -> [AnyHashable: Any]? {
+        guard isValid(data) else { return nil }
+        let sequence = UInt16(data[6]) << 8 | UInt16(data[7])
+        return [
+            "kind": "mesh-distress",
+            "packetKey": key(data) ?? "unknown",
+            "userId": String(unsignedInteger(data, at: 2)),
+            "sequence": Int(sequence),
+            "latitude": Double(signedInteger(data, at: 8)) / 10_000_000,
+            "longitude": Double(signedInteger(data, at: 12)) / 10_000_000,
+            "statusCode": Int(data[16]),
+            "reportedAt": Double(unsignedInteger(data, at: 17)),
+            "relaySource": "Nearby Bluetooth mesh",
+        ]
+    }
+
+    static func cloudSignal(
+        _ data: Data,
+        rssi: Int,
+        deliveredBy: String
+    ) -> PendingCloudSignal? {
+        guard isValid(data) else { return nil }
+        let userID = unsignedInteger(data, at: 2)
+        let sequence = UInt16(data[6]) << 8 | UInt16(data[7])
+        let originDeviceID = String(format: "%08x", userID)
+        return PendingCloudSignal(
+            messageID: "\(originDeviceID)_\(sequence)",
+            originDeviceID: originDeviceID,
+            latitude: Double(signedInteger(data, at: 8)) / 10_000_000,
+            longitude: Double(signedInteger(data, at: 12)) / 10_000_000,
+            statusCode: Int(data[16]),
+            packetTimestamp: unsignedInteger(data, at: 17),
+            rssi: max(-127, min(20, rssi)),
+            deliveredBy: deliveredBy,
+            hopCount: 0,
+            queuedAt: Date()
+        )
+    }
+
     static func notificationContent(_ data: Data) -> UNMutableNotificationContent? {
         guard isValid(data), data[16] != 0 else { return nil }
         let labels = [
@@ -47,8 +134,10 @@ private enum MeshPacket {
         content.title = "SafeRelay: \(title)"
         content.body = body
         content.sound = .default
-        content.interruptionLevel = .active
-        content.userInfo = ["packetKey": key(data) ?? "unknown"]
+        content.interruptionLevel = .timeSensitive
+        content.relevanceScore = 1
+        content.categoryIdentifier = distressNotificationCategory
+        content.userInfo = notificationUserInfo(data) ?? [:]
         return content
     }
 }
@@ -63,8 +152,14 @@ final class SafeRelayMeshService: NSObject {
     private let defaults = UserDefaults.standard
     private let enabledKey = "saferelay.mesh.enabled"
     private let packetKey = "saferelay.mesh.latestPacket"
+    private let cloudOutboxKey = "saferelay.cloud.nativeOutbox"
+    private let relayDeviceIDKey = "saferelay.cloud.relayDeviceID"
     private let centralRestoreID = "com.development.saferelay.mesh.central"
     private let peripheralRestoreID = "com.development.saferelay.mesh.peripheral"
+    private let pathMonitor = NWPathMonitor()
+    private let pathMonitorQueue = DispatchQueue(
+        label: "com.development.saferelay.cloud-reachability"
+    )
 
     private var centralManager: CBCentralManager?
     private var peripheralManager: CBPeripheralManager?
@@ -75,6 +170,9 @@ final class SafeRelayMeshService: NSObject {
     private var started = false
     private var serviceAdded = false
     private var startCompletions: [(Result<Void, Error>) -> Void] = []
+    private var cloudMonitorStarted = false
+    private var cloudUploadInFlight = false
+    private var cloudAuthorized = false
 
     fileprivate var eventHandler: ((MeshPacketEvent) -> Void)?
 
@@ -82,6 +180,7 @@ final class SafeRelayMeshService: NSObject {
     var isScanning: Bool { centralManager?.isScanning == true }
     var isAdvertising: Bool { peripheralManager?.isAdvertising == true }
     var connectedPeerCount: Int { connectedPeripherals.count }
+    var pendingCloudUploadCount: Int { loadCloudOutbox().count }
 
     var bluetoothAuthorization: String {
         switch CBManager.authorization {
@@ -105,11 +204,14 @@ final class SafeRelayMeshService: NSObject {
     }
 
     func configureAtLaunch() {
+        registerNotificationCategory()
+        startCloudReachability()
         if let packet = latestPacket() {
             remember(packet)
         }
         logger.notice("Starting always-on mesh service at launch")
         start()
+        flushCloudOutbox()
     }
 
     func start(completion: ((Result<Void, Error>) -> Void)? = nil) {
@@ -156,6 +258,7 @@ final class SafeRelayMeshService: NSObject {
         }
         defaults.set(data, forKey: packetKey)
         remember(data)
+        queueCloudUpload(data, rssi: -127)
         relay(data, excluding: nil)
         logger.notice("Published packet \(MeshPacket.key(data) ?? "unknown", privacy: .public)")
     }
@@ -199,7 +302,15 @@ final class SafeRelayMeshService: NSObject {
             content.sound = .default
             content.interruptionLevel = .active
             content.threadIdentifier = "saferelay-distress"
-            content.userInfo = ["kind": "notification-test"]
+            content.categoryIdentifier = distressNotificationCategory
+            var userInfo = self.latestPacket()
+                .flatMap(MeshPacket.notificationUserInfo) ?? [:]
+            userInfo["kind"] = "notification-test"
+            userInfo["packetKey"] = "notification-self-test"
+            userInfo["statusCode"] = 0
+            userInfo["reportedAt"] = Date().timeIntervalSince1970
+            userInfo["relaySource"] = "SafeRelay self-test"
+            content.userInfo = userInfo
             self.enqueueNotification(
                 identifier: "saferelay-notification-test",
                 content: content,
@@ -314,6 +425,7 @@ final class SafeRelayMeshService: NSObject {
             }
         }
         scheduleNotification(for: data)
+        queueCloudUpload(data, rssi: rssi)
         relay(data, excluding: sourcePeripheral)
         logger.notice("Received packet \(key, privacy: .public) via \(source, privacy: .public)")
     }
@@ -408,6 +520,236 @@ final class SafeRelayMeshService: NSObject {
             }
         }
     }
+
+    private func registerNotificationCategory() {
+        let openIncident = UNNotificationAction(
+            identifier: viewIncidentAction,
+            title: "Open Incident Map",
+            options: [.foreground]
+        )
+        let distress = UNNotificationCategory(
+            identifier: distressNotificationCategory,
+            actions: [openIncident],
+            intentIdentifiers: [],
+            options: []
+        )
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationCategories { categories in
+            var updated = Set(
+                categories.filter { $0.identifier != distressNotificationCategory }
+            )
+            updated.insert(distress)
+            center.setNotificationCategories(updated)
+        }
+    }
+
+    private func bundledCloudValue(_ key: String) -> String {
+        let value = (Bundle.main.object(forInfoDictionaryKey: key) as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return value.contains("$(") ? "" : value
+    }
+
+    private func cloudConfiguration() -> CloudRelayConfiguration? {
+        let baseURLText = bundledCloudValue("SafeRelayCloudURL")
+        guard !baseURLText.isEmpty, let baseURL = URL(string: baseURLText) else {
+            return nil
+        }
+        return CloudRelayConfiguration(
+            baseURL: baseURL,
+            previewToken: bundledCloudValue("SafeRelayCloudPreviewToken"),
+            previewCookie: bundledCloudValue("SafeRelayCloudPreviewCookie")
+        )
+    }
+
+    private func relayDeviceID() -> String {
+        if let existing = defaults.string(forKey: relayDeviceIDKey), !existing.isEmpty {
+            return existing
+        }
+        let identifier = UIDevice.current.identifierForVendor?.uuidString
+            ?? UUID().uuidString
+        let normalized = identifier.lowercased()
+        defaults.set(normalized, forKey: relayDeviceIDKey)
+        return normalized
+    }
+
+    private func loadCloudOutbox() -> [PendingCloudSignal] {
+        guard let data = defaults.data(forKey: cloudOutboxKey),
+              let signals = try? JSONDecoder().decode(
+                [PendingCloudSignal].self,
+                from: data
+              ) else {
+            return []
+        }
+        return signals
+    }
+
+    private func saveCloudOutbox(_ signals: [PendingCloudSignal]) {
+        guard let data = try? JSONEncoder().encode(signals) else { return }
+        defaults.set(data, forKey: cloudOutboxKey)
+    }
+
+    private func queueCloudUpload(_ data: Data, rssi: Int) {
+        guard let signal = MeshPacket.cloudSignal(
+            data,
+            rssi: rssi,
+            deliveredBy: relayDeviceID()
+        ) else {
+            return
+        }
+        var outbox = loadCloudOutbox()
+        guard !outbox.contains(where: { $0.messageID == signal.messageID }) else {
+            flushCloudOutbox()
+            return
+        }
+        outbox.append(signal)
+        if outbox.count > 2_048 {
+            outbox.removeFirst(outbox.count - 2_048)
+            logger.warning("Native cloud outbox reached its 2048-signal safety bound")
+        }
+        saveCloudOutbox(outbox)
+        logger.notice(
+            "Queued cloud signal \(signal.messageID, privacy: .public); \(outbox.count) pending"
+        )
+        flushCloudOutbox()
+    }
+
+    private func startCloudReachability() {
+        guard !cloudMonitorStarted else { return }
+        cloudMonitorStarted = true
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard path.status == .satisfied else { return }
+            DispatchQueue.main.async {
+                self?.flushCloudOutbox()
+            }
+        }
+        pathMonitor.start(queue: pathMonitorQueue)
+    }
+
+    private func authorizeCloud(
+        _ configuration: CloudRelayConfiguration,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard !configuration.previewToken.isEmpty else {
+            completion(true)
+            return
+        }
+        guard !cloudAuthorized else {
+            completion(true)
+            return
+        }
+        guard var components = URLComponents(
+            url: configuration.baseURL.appendingPathComponent("__auth"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            completion(false)
+            return
+        }
+        components.queryItems = [
+            URLQueryItem(name: "t", value: configuration.previewToken),
+            URLQueryItem(name: "embed", value: "1"),
+            URLQueryItem(name: "theme", value: "dark"),
+        ]
+        guard let url = components.url else {
+            completion(false)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 12
+        URLSession.shared.dataTask(with: request) {
+            [weak self] _, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let authorized = error == nil && (200..<400).contains(status)
+            DispatchQueue.main.async {
+                self?.cloudAuthorized = authorized
+                completion(authorized)
+            }
+        }.resume()
+    }
+
+    private func uploadCloudSignal(
+        _ signal: PendingCloudSignal,
+        configuration: CloudRelayConfiguration,
+        completion: @escaping (Bool) -> Void
+    ) {
+        let endpoint = configuration.baseURL
+            .appendingPathComponent("function")
+            .appendingPathComponent("ingest_mobile_signal")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !configuration.previewCookie.isEmpty {
+            request.setValue(
+                configuration.previewCookie,
+                forHTTPHeaderField: "Cookie"
+            )
+        }
+        guard let body = try? JSONSerialization.data(
+            withJSONObject: signal.payload
+        ) else {
+            completion(false)
+            return
+        }
+        request.httpBody = body
+        URLSession.shared.dataTask(with: request) {
+            [weak self] data, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 401 {
+                self?.cloudAuthorized = false
+            }
+            let accepted: Bool
+            if error == nil,
+               (200..<300).contains(status),
+               let data,
+               let envelope = try? JSONSerialization.jsonObject(with: data)
+                    as? [String: Any],
+               let responseData = envelope["data"] as? [String: Any],
+               let result = responseData["result"] as? [String: Any] {
+                accepted = result["success"] as? Bool == true
+            } else {
+                accepted = false
+            }
+            DispatchQueue.main.async {
+                completion(accepted)
+            }
+        }.resume()
+    }
+
+    func flushCloudOutbox() {
+        guard !cloudUploadInFlight,
+              let configuration = cloudConfiguration(),
+              let signal = loadCloudOutbox().first else {
+            return
+        }
+        cloudUploadInFlight = true
+        authorizeCloud(configuration) { [weak self] authorized in
+            guard let self else { return }
+            guard authorized else {
+                cloudUploadInFlight = false
+                logger.warning("Jac cloud preview authorization is unavailable")
+                return
+            }
+            uploadCloudSignal(signal, configuration: configuration) {
+                [weak self] accepted in
+                guard let self else { return }
+                cloudUploadInFlight = false
+                guard accepted else {
+                    logger.warning(
+                        "Cloud upload deferred for \(signal.messageID, privacy: .public)"
+                    )
+                    return
+                }
+                var outbox = loadCloudOutbox()
+                outbox.removeAll { $0.messageID == signal.messageID }
+                saveCloudOutbox(outbox)
+                logger.notice(
+                    "Cloud receipted \(signal.messageID, privacy: .public); \(outbox.count) pending"
+                )
+                flushCloudOutbox()
+            }
+        }
+    }
 }
 
 extension SafeRelayMeshService: CBCentralManagerDelegate {
@@ -462,11 +804,18 @@ extension SafeRelayMeshService: CBCentralManagerDelegate {
         isReconnecting: Bool,
         error: Error?
     ) {
-        connectedPeripherals.removeValue(forKey: peripheral.identifier)
-        guard isEnabled else { return }
+        guard isEnabled else {
+            connectedPeripherals.removeValue(forKey: peripheral.identifier)
+            return
+        }
+        peripheral.delegate = self
+        connectedPeripherals[peripheral.identifier] = peripheral
         central.connect(
             peripheral,
-            options: [CBConnectPeripheralOptionNotifyOnConnectionKey: true]
+            options: [
+                CBConnectPeripheralOptionNotifyOnConnectionKey: true,
+                CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+            ]
         )
         logger.notice("Peer disconnected; reconnect requested")
     }
@@ -679,6 +1028,7 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "testNotification", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startCompass", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopCompass", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "cloudPost", returnType: CAPPluginReturnPromise),
     ]
 
     public override func load() {
@@ -797,6 +1147,101 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
         ])
     }
 
+    @objc func cloudPost(_ call: CAPPluginCall) {
+        guard let baseURLText = call.getString("baseUrl"),
+              let baseURL = URL(string: baseURLText),
+              let path = call.getString("path"),
+              path.hasPrefix("/function/") else {
+            call.reject("Invalid Jac cloud endpoint.")
+            return
+        }
+
+        let previewToken = call.getString("previewToken")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fallbackCookie = call.getString("previewCookie")?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let payload = call.getObject("data") ?? [:]
+
+        let post: (Bool) -> Void = { useFallbackCookie in
+            guard let endpoint = URL(string: path, relativeTo: baseURL)?.absoluteURL else {
+                DispatchQueue.main.async {
+                    call.reject("Invalid Jac cloud function URL.")
+                }
+                return
+            }
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 15
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            if useFallbackCookie && !fallbackCookie.isEmpty {
+                request.setValue(fallbackCookie, forHTTPHeaderField: "Cookie")
+            }
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: payload)
+            } catch {
+                DispatchQueue.main.async {
+                    call.reject("Jac cloud payload could not be encoded.")
+                }
+                return
+            }
+
+            URLSession.shared.dataTask(with: request) { data, response, error in
+                if let error {
+                    DispatchQueue.main.async {
+                        call.reject(error.localizedDescription)
+                    }
+                    return
+                }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let responseData: Any
+                if let data,
+                   let decoded = try? JSONSerialization.jsonObject(with: data) {
+                    responseData = decoded
+                } else if let data {
+                    responseData = String(data: data, encoding: .utf8) ?? ""
+                } else {
+                    responseData = ""
+                }
+                DispatchQueue.main.async {
+                    call.resolve([
+                        "status": status,
+                        "data": responseData,
+                    ])
+                }
+            }.resume()
+        }
+
+        guard !previewToken.isEmpty else {
+            post(!fallbackCookie.isEmpty)
+            return
+        }
+        guard var auth = URLComponents(
+            url: baseURL.appendingPathComponent("__auth"),
+            resolvingAgainstBaseURL: false
+        ) else {
+            call.reject("Invalid Jac cloud authorization URL.")
+            return
+        }
+        auth.queryItems = [
+            URLQueryItem(name: "t", value: previewToken),
+            URLQueryItem(name: "embed", value: "1"),
+            URLQueryItem(name: "theme", value: "dark"),
+        ]
+        guard let authURL = auth.url else {
+            call.reject("Invalid Jac cloud authorization token.")
+            return
+        }
+
+        var authRequest = URLRequest(url: authURL)
+        authRequest.timeoutInterval = 10
+        URLSession.shared.dataTask(with: authRequest) { _, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let authorized = error == nil && (200..<400).contains(status)
+            post(!authorized && !fallbackCookie.isEmpty)
+        }.resume()
+    }
+
     private func statusDictionary() -> [String: Any] {
         let service = SafeRelayMeshService.shared
         let backgroundRefresh: String
@@ -814,7 +1259,8 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
             "bluetoothState": service.bluetoothState,
             "backgroundRefresh": backgroundRefresh,
             "connectedPeers": service.connectedPeerCount,
-            "version": "native-ios-2",
+            "pendingCloudUploads": service.pendingCloudUploadCount,
+            "version": "native-ios-3",
         ]
     }
 }

@@ -18,6 +18,12 @@ final class SafeRelayBridgeViewController:
         let isSOS: Bool
     }
 
+    private struct NativeMapAction {
+        let elementID: String
+        let label: String
+        let symbol: String
+    }
+
     private let nativeTabs = [
         NativeTab(elementID: "nav-home", title: "Home", symbol: "house.fill", isSOS: false),
         NativeTab(elementID: "nav-map", title: "Map", symbol: "map.fill", isSOS: false),
@@ -37,10 +43,18 @@ final class SafeRelayBridgeViewController:
         (elementID: "sos-trapped", title: "Trapped"),
         (elementID: "sos-supplies", title: "Supplies")
     ]
+    private let nativeMapActions = [
+        NativeMapAction(elementID: "map-zoom-in", label: "Zoom in", symbol: "plus.magnifyingglass"),
+        NativeMapAction(elementID: "map-zoom-out", label: "Zoom out", symbol: "minus.magnifyingglass"),
+        NativeMapAction(elementID: "map-locate", label: "Locate me", symbol: "location.fill"),
+        NativeMapAction(elementID: "map-fit-signals", label: "Fit active signals", symbol: "scope")
+    ]
 
     private var nativeTabBar: UITabBar?
     private var fieldToolsControl: UISegmentedControl?
     private var sosTypeControl: UISegmentedControl?
+    private var nativeMapControls: UIStackView?
+    private var nativeMapLocateButton: UIButton?
     private var nativeSOSButton: UIButton?
     private var nativeSOSButtonTopConstraint: NSLayoutConstraint?
     private var nativeSOSButtonWidthConstraint: NSLayoutConstraint?
@@ -87,6 +101,9 @@ final class SafeRelayBridgeViewController:
         if let nativeSOSButton {
             view.bringSubviewToFront(nativeSOSButton)
         }
+        if let nativeMapControls, !nativeMapControls.isHidden {
+            view.bringSubviewToFront(nativeMapControls)
+        }
         if let nativeBeaconButton {
             view.bringSubviewToFront(nativeBeaconButton)
         }
@@ -100,6 +117,7 @@ final class SafeRelayBridgeViewController:
 
     private func installNativeChrome() {
         installNativeTabBar()
+        installNativeMapControls()
         installFieldToolsControl()
         installSOSTypeControl()
         installNativeSOSButton()
@@ -134,6 +152,110 @@ final class SafeRelayBridgeViewController:
 
         nativeTabBar = tabBar
         exposeNativeChromeToJac()
+    }
+
+    private func installNativeMapControls() {
+        guard nativeMapControls == nil else { return }
+
+        let stack = UIStackView()
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.distribution = .fill
+        stack.spacing = 7
+        stack.isHidden = true
+        stack.accessibilityIdentifier = "native-map-controls"
+
+        for (index, action) in nativeMapActions.enumerated() {
+            let button = UIButton(type: .system)
+            button.tag = index
+            button.accessibilityIdentifier = "native-\(action.elementID)"
+            button.accessibilityLabel = action.label
+            button.configuration = nativeMapButtonConfiguration(
+                symbol: action.symbol,
+                highlighted: action.elementID == "map-locate"
+            )
+            button.layer.shadowColor = UIColor.black.cgColor
+            button.layer.shadowOpacity = 0.2
+            button.layer.shadowRadius = 12
+            button.layer.shadowOffset = CGSize(width: 0, height: 6)
+            button.addTarget(
+                self,
+                action: #selector(nativeMapControlPressed(_:)),
+                for: .touchUpInside
+            )
+            button.heightAnchor.constraint(equalToConstant: 42).isActive = true
+            stack.addArrangedSubview(button)
+            if action.elementID == "map-locate" {
+                nativeMapLocateButton = button
+            }
+        }
+
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.topAnchor,
+                constant: 12
+            ),
+            stack.trailingAnchor.constraint(
+                equalTo: view.safeAreaLayoutGuide.trailingAnchor,
+                constant: -12
+            ),
+            stack.widthAnchor.constraint(equalToConstant: 42)
+        ])
+
+        nativeMapControls = stack
+        updateNativeMapLocateButton(locationReady: false, locating: false)
+    }
+
+    private func nativeMapButtonConfiguration(
+        symbol: String,
+        highlighted: Bool = false
+    ) -> UIButton.Configuration {
+        var configuration = UIButton.Configuration.glass()
+        configuration.buttonSize = .medium
+        configuration.cornerStyle = .capsule
+        configuration.baseForegroundColor = highlighted ? signalTint : .label
+        configuration.image = UIImage(systemName: symbol)
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            pointSize: 17,
+            weight: .semibold
+        )
+        configuration.contentInsets = NSDirectionalEdgeInsets(
+            top: 9,
+            leading: 9,
+            bottom: 9,
+            trailing: 9
+        )
+        return configuration
+    }
+
+    private func updateNativeMapLocateButton(
+        locationReady: Bool,
+        locating: Bool
+    ) {
+        guard let button = nativeMapLocateButton else { return }
+        var configuration = nativeMapButtonConfiguration(
+            symbol: locationReady ? "location.fill" : "location",
+            highlighted: true
+        )
+        configuration.image = locating ? nil : configuration.image
+        configuration.showsActivityIndicator = locating
+        button.configuration = configuration
+        button.isEnabled = !locating
+        button.accessibilityValue = locating
+            ? "Locating"
+            : (locationReady ? "Location available" : "Location unavailable")
+    }
+
+    @objc private func nativeMapControlPressed(_ sender: UIButton) {
+        guard nativeMapActions.indices.contains(sender.tag) else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let action = nativeMapActions[sender.tag]
+        clickJacElement(action.elementID) { [weak sender] accepted in
+            guard !accepted else { return }
+            sender?.accessibilityValue = "Map action unavailable"
+        }
     }
 
     private func installFieldToolsControl() {
@@ -206,7 +328,7 @@ final class SafeRelayBridgeViewController:
         button.alpha = 0
         button.accessibilityIdentifier = "native-sos-action"
         button.accessibilityLabel = "SOS"
-        button.accessibilityHint = "Tap once to arm, then tap again to send the distress packet"
+        button.accessibilityHint = "Tap to start broadcasting. Tap again to stop."
         button.addTarget(
             self,
             action: #selector(nativeSOSButtonPressed),
@@ -237,14 +359,14 @@ final class SafeRelayBridgeViewController:
         nativeSOSButtonWidthConstraint = widthConstraint
         nativeSOSButtonHeightConstraint = heightConstraint
         updateNativeSOSButton(
-            armed: false,
+            active: false,
             busy: false,
             status: "Rescue"
         )
     }
 
     private func updateNativeSOSButton(
-        armed: Bool,
+        active: Bool,
         busy: Bool,
         status: String,
         stage: String = "idle",
@@ -259,7 +381,7 @@ final class SafeRelayBridgeViewController:
         configuration.baseForegroundColor = .white
         configuration.title = "SOS"
         configuration.subtitle = nativeSOSSubtitle(
-            armed: armed,
+            active: active,
             status: status,
             stage: stage
         )
@@ -267,8 +389,8 @@ final class SafeRelayBridgeViewController:
         configuration.image = busy
             ? nil
             : UIImage(
-                systemName: armed
-                    ? "exclamationmark.triangle.fill"
+                systemName: active
+                    ? "stop.fill"
                     : "antenna.radiowaves.left.and.right"
             )
         configuration.imagePlacement = .top
@@ -294,9 +416,9 @@ final class SafeRelayBridgeViewController:
         button.configuration = configuration
         button.isEnabled = !busy
         button.accessibilityValue = message.isEmpty
-            ? (busy ? "Sending" : (armed ? "Armed" : "Not armed"))
+            ? (busy ? "Working" : (active ? "Broadcasting, tap to stop" : "Ready"))
             : message
-        setNativeSOSPulseAnimation(armed || busy)
+        setNativeSOSPulseAnimation(active || busy)
     }
 
     private func sosColor(for status: String) -> UIColor {
@@ -531,21 +653,32 @@ final class SafeRelayBridgeViewController:
     }
 
     private func nativeSOSSubtitle(
-        armed: Bool,
+        active: Bool,
         status: String,
         stage: String
     ) -> String {
+        if active && stage == "accepted" {
+            return "BROADCASTING • TAP TO STOP"
+        }
+        if active && stage == "queued" {
+            return "SOS ACTIVE • TAP TO STOP"
+        }
+        if active && (stage == "blocked" || stage == "failed") {
+            return "SOS ACTIVE • TAP TO STOP"
+        }
         switch stage {
         case "locating": return "ACQUIRING POSITION"
         case "saving": return "SAVING ON DEVICE"
+        case "stopping": return "STOPPING BROADCAST"
         case "starting-radio": return "STARTING RADIO"
         case "broadcasting": return "BROADCASTING"
-        case "accepted": return "SAVED • RADIO ACCEPTED"
-        case "queued": return "SAVED • RETRY QUEUED"
+        case "accepted": return "BROADCAST ACTIVE"
+        case "queued": return "SOS ACTIVE • RETRY QUEUED"
+        case "stopped": return "BROADCAST STOPPED"
+        case "stop-queued": return "STOPPED • RADIO RETRY QUEUED"
         case "blocked": return "POSITION REQUIRED"
         case "failed": return "TAP TO RETRY"
-        default:
-            return armed ? "TAP AGAIN TO SEND" : "ARM \(status.uppercased())"
+        default: return "START \(status.uppercased()) BROADCAST"
         }
     }
 
@@ -573,9 +706,9 @@ final class SafeRelayBridgeViewController:
         }
         guard button.layer.animation(forKey: key) == nil else { return }
         let pulse = CAKeyframeAnimation(keyPath: "transform.scale")
-        pulse.values = [1, 1.035, 1]
-        pulse.keyTimes = [0, 0.5, 1]
-        pulse.duration = 0.95
+        pulse.values = [1, 1.055, 0.995, 1.035, 1, 1]
+        pulse.keyTimes = [0, 0.12, 0.25, 0.36, 0.5, 1]
+        pulse.duration = 1.35
         pulse.repeatCount = .infinity
         pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
         button.layer.add(pulse, forKey: key)
@@ -773,6 +906,7 @@ final class SafeRelayBridgeViewController:
         nativeTabBar?.tintColor = tab.isSOS ? .systemRed : signalTint
         fieldToolsControl?.isHidden = tab.elementID != "nav-tools"
         sosTypeControl?.isHidden = !tab.isSOS
+        nativeMapControls?.isHidden = tab.elementID != "nav-map"
         setNativeBeaconButtonVisible(
             tab.elementID == "nav-tools"
                 && fieldToolsControl?.selectedSegmentIndex == 2
@@ -791,6 +925,9 @@ final class SafeRelayBridgeViewController:
         }
         if tab.isSOS, let nativeSOSButton {
             view.bringSubviewToFront(nativeSOSButton)
+        }
+        if tab.elementID == "nav-map", let nativeMapControls {
+            view.bringSubviewToFront(nativeMapControls)
         }
         if tab.elementID == "nav-tools",
            fieldToolsControl?.selectedSegmentIndex == 2,
@@ -1042,6 +1179,7 @@ final class SafeRelayBridgeViewController:
           const sonicBase = document.getElementById('sonic-base-frequency');
           const sonicSend = document.getElementById('sonic-send-action');
           const sonicListen = document.getElementById('sonic-listen-action');
+          const mapLocate = document.getElementById('map-locate');
           const settings = document.getElementById('native-settings-state');
           const sosRect = sosAction?.getBoundingClientRect();
           const beaconRect = beaconAction?.getBoundingClientRect();
@@ -1086,7 +1224,7 @@ final class SafeRelayBridgeViewController:
               pluginVersion: settings.dataset.pluginVersion ?? 'unknown'
             } : null,
             sosAction: sosAction ? {
-              armed: sosAction.classList.contains('armed'),
+              active: sosAction.classList.contains('active'),
               busy: sosAction.disabled,
               stage: sosAction.dataset.state ?? 'idle',
               message: sosAction.dataset.message ?? '',
@@ -1096,6 +1234,10 @@ final class SafeRelayBridgeViewController:
                 width: sosRect.width,
                 height: sosRect.height
               } : null
+            } : null,
+            mapAction: mapLocate ? {
+              locating: mapLocate.disabled,
+              locationReady: mapLocate.classList.contains('has-location')
             } : null,
             beaconAction: beaconAction ? {
               active: beaconAction.classList.contains('active'),
@@ -1147,7 +1289,7 @@ final class SafeRelayBridgeViewController:
             }
             if let action = values["sosAction"] as? [String: Any] {
                 updateNativeSOSButton(
-                    armed: action["armed"] as? Bool ?? false,
+                    active: action["active"] as? Bool ?? false,
                     busy: action["busy"] as? Bool ?? false,
                     status: action["status"] as? String ?? "Rescue",
                     stage: action["stage"] as? String ?? "idle",
@@ -1160,6 +1302,20 @@ final class SafeRelayBridgeViewController:
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                         [weak self] in
                         guard self?.nativeSOSButton?.isHidden == false else { return }
+                        self?.syncNativeControlsFromJac()
+                    }
+                }
+            }
+            if let action = values["mapAction"] as? [String: Any] {
+                let locating = action["locating"] as? Bool ?? false
+                updateNativeMapLocateButton(
+                    locationReady: action["locationReady"] as? Bool ?? false,
+                    locating: locating
+                )
+                if locating {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        [weak self] in
+                        guard self?.nativeMapControls?.isHidden == false else { return }
                         self?.syncNativeControlsFromJac()
                     }
                 }

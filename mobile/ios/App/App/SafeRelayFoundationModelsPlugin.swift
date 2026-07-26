@@ -124,8 +124,24 @@ public final class SafeRelayFoundationModelsPlugin: CAPPlugin, CAPBridgedPlugin 
                     "availability": "available",
                     "reply": normalizedReply(reply)
                 ])
+            } catch let error as LanguageModelError {
+                switch error {
+                case .guardrailViolation, .refusal:
+                    call.resolve([
+                        "available": true,
+                        "availability": "available",
+                        "reply": """
+                        I can't help with that request. I can still help with \
+                        immediate safety, evacuation, shelter, first aid, or \
+                        signaling. Tell me what is happening and what you need \
+                        right now.
+                        """
+                    ])
+                default:
+                    call.reject("On-device guide is temporarily unavailable.")
+                }
             } catch {
-                call.reject("On-device guide failed: \(error.localizedDescription)")
+                call.reject("On-device guide is temporarily unavailable.")
             }
         }
     }
