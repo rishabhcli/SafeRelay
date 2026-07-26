@@ -289,7 +289,6 @@ def:pub client_field_brief(
 def:pub client_assess_cloud_queue(
     packets: list[ClientSosPacket],
     online: bool,
-    privacy_mode: str,
     initialized: bool
 ) -> ClientCloudQueueReport {
     queued = 0;
@@ -297,11 +296,8 @@ def:pub client_assess_cloud_queue(
         if not packet.is_synced { queued += 1; }
     }
     blockers: list[str] = [];
-    if privacy_mode != "Cloud Bridge" {
-        blockers.append("Privacy mode blocks cloud upload");
-    }
-    if not online { blockers.append("Internet is offline"); }
-    if not initialized { blockers.append("Cloud client is not initialized"); }
+    if not online { blockers.append("Jac cloud relay is unreachable"); }
+    if not initialized { blockers.append("Jac cloud relay is not configured"); }
     eligible = queued if len(blockers) == 0 else 0;
     state = "ready" if eligible > 0 else ("empty" if queued == 0 else "blocked");
     return ClientCloudQueueReport(
@@ -311,7 +307,7 @@ def:pub client_assess_cloud_queue(
         blockers=blockers,
         facts=[
             str(queued) + " unsynced local packets",
-            "Upload requires Cloud Bridge privacy mode"
+            "Every packet uploads automatically when the Jac cloud relay is reachable"
         ]
     );
 }

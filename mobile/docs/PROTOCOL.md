@@ -24,7 +24,7 @@ Packets older than 24 hours are expired. Status codes are:
 - `5`: shelter
 
 Packet identity is `sender_id + sequence`. A newer sequence from the same
-sender replaces the older local observation. Relay policy blocks Local Only,
-stops SAFE propagation, drops expired or over-hop packets, preserves critical
-reports under queue pressure, and can defer lower-priority traffic in Battery
-Saver mode.
+sender replaces the older local observation. Bluetooth routing cannot be
+disabled by a privacy label. Relay policy stops SAFE propagation, drops expired
+or over-hop packets, preserves critical reports under queue pressure, and can
+defer lower-priority traffic in Battery Saver mode.

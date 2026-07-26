@@ -13,10 +13,13 @@ import from .storage {
 glob USGS_DAY_URL: str = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson";
 glob NOAA_ALERTS_URL: str = "https://api.weather.gov/alerts/active?severity=Severe,Extreme";
 glob GDACS_RSS_URL: str = "https://www.gdacs.org/xml/rss.xml";
-glob SUPABASE_URL: str = "https://iiompuquacigtguvizfa.supabase.co";
-glob SUPABASE_ANON_KEY: str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imlpb21wdXF1YWNpZ3RndXZpemZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc4NDMwMTMsImV4cCI6MjA4MzQxOTAxM30.Ml2JbvYVmMDur1lr5gT81Uathm5VwUEQFWhuZExsdoo";
+glob CLOUD_RELAY_URL: str = str(__SAFERELAY_CLOUD_URL__);  # jac:ignore[W2001]
+glob CLOUD_RELAY_PREVIEW_TOKEN: str = str(__SAFERELAY_CLOUD_PREVIEW_TOKEN__);  # jac:ignore[W2001]
+glob CLOUD_RELAY_PREVIEW_COOKIE: str = str(__SAFERELAY_CLOUD_PREVIEW_COOKIE__);  # jac:ignore[W2001]
 
 glob _internet_failures: int = 0;
+glob _cloud_authorized: bool = False;
+glob _cloud_session_cookie: str = "";
 glob _last_disaster_fetch_ms: int = 0;
 glob _ultrasonic_context: any = None;  # jac:ignore[W1037]
 glob _ultrasonic_stream: any = None;  # jac:ignore[W1037]
@@ -33,35 +36,139 @@ def _now_ms -> int {
 
 
 async def:pub verify_internet -> dict[str, object] {
-    targets = [
-        "https://earthquake.usgs.gov/fdsnws/event/1/version",
-        "https://api.weather.gov/"
-    ];
-    for target in targets {
-        try {
-            response = await fetch(target, {  # jac:ignore[W2001]
-                "method": "GET",
-                "cache": "no-store",
-                "headers": {"Accept": "text/plain, application/json"}
-            });
-            if response.ok {
-                _internet_failures = 0;
-                return {
-                    "online": True,
-                    "failures": 0,
-                    "autoMesh": False,
-                    "target": target
-                };
-            }
-        } except Exception {}
+    target = CLOUD_RELAY_URL.rstrip("/") + "/function/cloud_relay_health";
+    if not CLOUD_RELAY_URL.strip() {
+        return {
+            "online": False,
+            "configured": False,
+            "failures": _internet_failures,
+            "autoMesh": True,
+            "target": "",
+            "message": "Jac cloud relay URL is not configured."
+        };
     }
+    try {
+        await _authorize_cloud();
+        response: any = await _cloud_post("/function/cloud_relay_health", {});  # jac:ignore[W1037]
+        result: any = _cloud_result(response["body"]);  # jac:ignore[W1037]
+        if bool(response["ok"]) and result and bool(result["accepting"]) {
+            _internet_failures = 0;
+            return {
+                "online": True,
+                "configured": True,
+                "failures": 0,
+                "autoMesh": True,
+                "target": target,
+                "message": "Jac cloud relay is reachable."
+            };
+        }
+    } except Exception {}
     _internet_failures += 1;
     return {
         "online": False,
+        "configured": True,
         "failures": _internet_failures,
-        "autoMesh": _internet_failures >= 3,
-        "target": ""
+        "autoMesh": True,
+        "target": target,
+        "message": "Jac cloud relay is unreachable; packets remain queued locally."
     };
+}
+
+
+def _cloud_endpoint(path: str) -> str {
+    return CLOUD_RELAY_URL.rstrip("/") + path;
+}
+
+
+async def _authorize_cloud {
+    if _cloud_authorized { return; }
+    if CLOUD_RELAY_PREVIEW_COOKIE.strip() {
+        _cloud_authorized = True;
+        return;
+    }
+    if not CLOUD_RELAY_PREVIEW_TOKEN.strip() { return; }
+    auth_url = (
+        _cloud_endpoint("/__auth?t=")
+        + str(encodeURIComponent(CLOUD_RELAY_PREVIEW_TOKEN))  # jac:ignore[W2001]
+        + "&embed=1&theme=dark"
+    );
+    if _capacitor.isNativePlatform() {
+        response = await _http.get({
+            "url": auth_url,
+            "connectTimeout": 10000,
+            "readTimeout": 10000
+        });
+        _cloud_authorized = int(response.status) >= 200 and int(response.status) < 400;
+        _capture_cloud_cookie(response.headers);
+        return;
+    }
+    response = await fetch(auth_url, {  # jac:ignore[W2001]
+        "method": "GET",
+        "credentials": "include",
+        "redirect": "follow"
+    });
+    _cloud_authorized = bool(response.ok);
+}
+
+
+def _capture_cloud_cookie(headers: any) {  # jac:ignore[W1037]
+    try {
+        raw_cookie = str(headers["set-cookie"] or headers["Set-Cookie"] or "");
+        if raw_cookie.strip() {
+            _cloud_session_cookie = raw_cookie.split(";")[0].strip();
+        }
+    } except Exception {}
+}
+
+
+async def _cloud_post(path: str, data: dict[str, object]) -> dict[str, object] {
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json"
+    };
+    if _capacitor.isNativePlatform() {
+        cookie = _cloud_session_cookie.strip() or CLOUD_RELAY_PREVIEW_COOKIE.strip();
+        if cookie {
+            headers["Cookie"] = cookie;
+        }
+        response = await _http.post({
+            "url": _cloud_endpoint(path),
+            "headers": headers,
+            "data": data,
+            "connectTimeout": 10000,
+            "readTimeout": 15000
+        });
+        status = int(response.status);
+        return {
+            "ok": status >= 200 and status < 300,
+            "status": status,
+            "body": response.data
+        };
+    }
+    response = await fetch(_cloud_endpoint(path), {  # jac:ignore[W2001]
+        "method": "POST",
+        "headers": headers,
+        "credentials": "include",
+        "body": JSON.stringify(data)  # jac:ignore[W2001]
+    });
+    return {
+        "ok": bool(response.ok),
+        "status": int(response.status),
+        "body": await response.json()
+    };
+}
+
+
+def _cloud_result(payload: any) -> any {  # jac:ignore[W1037]
+    try {
+        parsed: any = JSON.parse(payload) if isinstance(payload, str) else payload;  # jac:ignore[W1037, W2001]
+        if parsed and parsed["data"] and parsed["data"]["result"] {
+            return parsed["data"]["result"];
+        }
+    } except Exception {
+        return None;
+    }
+    return None;
 }
 
 
@@ -368,6 +475,16 @@ async def:pub cache_map_region(
             "boundary": "Offline tile cache unavailable: " + str(error)
         };
     }
+    }
+
+
+async def:pub clear_cached_map_region -> bool {
+    try {
+        cache_storage: any = _window.caches;  # jac:ignore[W1037]
+        return bool(await cache_storage.delete("saferelay-osm-v1"));
+    } except Exception {
+        return False;
+    }
 }
 
 
@@ -378,7 +495,7 @@ def _attempt(
     synced: int,
     failed: int,
     duplicates: int,
-    privacy_mode: str,
+    route: str,
     message: str
 ) -> dict[str, object] {
     return {
@@ -389,7 +506,7 @@ def _attempt(
         "synced": synced,
         "failed": failed,
         "duplicates": duplicates,
-        "privacyMode": privacy_mode,
+        "route": route,
         "message": message
     };
 }
@@ -398,27 +515,39 @@ def _attempt(
 async def:pub sync_relayed_packets(
     packets: list[any],  # jac:ignore[W1037]
     local_user_id: int,
-    privacy_mode: str,
     online: bool,
     platform: str
 ) -> dict[str, object] {
     pending = [
         packet for packet in packets
-        if not packet.is_synced and packet.user_id != local_user_id
+        if not packet.is_synced
     ];
     attempt_id = "sync-" + str(_now_ms());
-    if privacy_mode != "Cloud Bridge" {
-        item = _attempt(attempt_id, "blocked", len(pending), 0, 0, 0, privacy_mode, "Privacy Bridge blocked cloud upload.");
-        await append_record(SYNC_ATTEMPTS_KEY, item);
-        return item | {"syncedIds": [], "receipts": []};
-    }
     if not online {
-        item = _attempt(attempt_id, "offline", len(pending), 0, 0, 0, privacy_mode, "Internet was unavailable; packets remain local.");
+        item = _attempt(
+            attempt_id,
+            "offline",
+            len(pending),
+            0,
+            0,
+            0,
+            "automatic",
+            "Jac cloud relay is unreachable; packets remain queued locally."
+        );
         await append_record(SYNC_ATTEMPTS_KEY, item);
         return item | {"syncedIds": [], "receipts": []};
     }
     if len(pending) == 0 {
-        item = _attempt(attempt_id, "empty", 0, 0, 0, 0, privacy_mode, "No relayed packets need cloud upload.");
+        item = _attempt(
+            attempt_id,
+            "empty",
+            0,
+            0,
+            0,
+            0,
+            "automatic",
+            "No packets need cloud upload."
+        );
         await append_record(SYNC_ATTEMPTS_KEY, item);
         return item | {"syncedIds": [], "receipts": []};
     }
@@ -429,34 +558,28 @@ async def:pub sync_relayed_packets(
     synced_ids: list[str] = [];
     receipts: list[dict[str, object]] = [];
     device_id = hex(local_user_id)[2:].zfill(8);
-    headers = {
-        "apikey": SUPABASE_ANON_KEY,
-        "Authorization": "Bearer " + SUPABASE_ANON_KEY,
-        "Content-Type": "application/json"
-    };
     for packet in pending {
         packet_id = packet.unique_id();
         origin_id = hex(packet.user_id)[2:].zfill(8);
         try {
-            response = await fetch(SUPABASE_URL + "/rest/v1/rpc/sync_sos_packet", {  # jac:ignore[W2001]
-                "method": "POST",
-                "headers": headers,
-                "body": JSON.stringify({  # jac:ignore[W2001]
-                    "p_message_id": origin_id + "_" + str(packet.sequence),
-                    "p_device_id": origin_id,
-                    "p_latitude": packet.latitude(),
-                    "p_longitude": packet.longitude(),
-                    "p_status_code": packet.status_code,
-                    "p_timestamp": packet.timestamp,
-                    "p_rssi": packet.rssi,
-                    "p_delivered_by": device_id,
-                    "p_hop_count": max(1, packet.relay_hops)
-                })
-            });
-            body: any = await response.json();  # jac:ignore[W1037]
-            result: any = body[0] if isinstance(body, list) and len(body) > 0 else body;  # jac:ignore[W1037]
-            success = bool(response.ok and result.success);
-            is_new = bool(result.is_new) if success else False;
+            response: any = await _cloud_post(  # jac:ignore[W1037]
+                "/function/ingest_mobile_signal",
+                {
+                    "message_id": origin_id + "_" + str(packet.sequence),
+                    "origin_device_id": origin_id,
+                    "latitude": packet.latitude(),
+                    "longitude": packet.longitude(),
+                    "status_code": packet.status_code,
+                    "packet_timestamp": packet.timestamp,
+                    "rssi": packet.rssi,
+                    "delivered_by": device_id,
+                    "hop_count": max(0, packet.relay_hops)
+                }
+            ); 
+            body: any = response["body"];  # jac:ignore[W1037]
+            result: any = _cloud_result(body);  # jac:ignore[W1037]
+            success = bool(response["ok"] and result and result["success"]);
+            is_new = bool(result["is_new"]) if success else False;
             if success {
                 synced_ids.append(packet_id);
                 if is_new { synced += 1; }
@@ -495,7 +618,7 @@ async def:pub sync_relayed_packets(
         synced,
         failed,
         duplicates,
-        privacy_mode,
+        "automatic",
         "Cloud upload completed." if failed == 0 else "Cloud upload completed with failures."
     );
     await append_record(SYNC_ATTEMPTS_KEY, item);

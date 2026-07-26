@@ -262,13 +262,13 @@ def:pub active_foreign_distress(
 def:pub evaluate_relay(
     packet: SosPacket,
     now_seconds: int,
-    privacy_mode: str,
+    routing_mode: str,
     battery_mode: str,
     queue_depth: int,
     max_queue_depth: int = 100
 ) -> RelayResult {
     facts = [
-        "Privacy mode: " + privacy_mode,
+        "Routing mode: " + routing_mode,
         "Battery mode: " + battery_mode,
         "Queue depth: " + str(queue_depth) + "/" + str(max_queue_depth),
         "Status: " + status_label(packet.status_code),
@@ -278,14 +278,6 @@ def:pub evaluate_relay(
         "A policy decision is not physical multi-device relay proof."
     ];
 
-    if privacy_mode == "Local Only" {
-        return RelayResult(
-            decision="blocked",
-            reason="Privacy mode blocks forwarding",
-            facts=facts,
-            unknowns=unknowns
-        );
-    }
     if packet.status_code == 0 {
         return RelayResult(
             decision="drop",

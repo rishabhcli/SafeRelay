@@ -27,20 +27,23 @@ Their wire constants and algorithms are intentionally kept equivalent.
 ## Runtime flow
 
 1. Jac renders the operator shell inside Capacitor.
-2. Starting the mesh requests BLE permission.
+2. Native launch and every foreground transition start or restore the mesh and
+   request BLE permission when needed.
 3. The BLE plugin creates both a central scanner and a peripheral GATT server.
 4. The central subscribes to the SafeRelay characteristic on discovered peers.
 5. The peripheral advertises the same service and accepts peer writes.
 6. Valid packets enter Jac policy, local persistence, notification, and relay.
 7. Android starts an app-owned foreground service; iOS relies on declared
    CoreBluetooth background modes.
-8. USGS, NOAA, and GDACS data is cached locally; cloud upload remains explicitly
-   privacy-gated and creates attempt and receipt evidence.
+8. USGS, NOAA, and GDACS data is cached locally.
+9. Every locally created or received signal attempts the configured JacHammer
+   cloud endpoint; unreachable signals stay queued for the next connectivity
+   event or periodic probe.
 
-Packets stay on the device unless relay policy allows forwarding. Cloud Bridge
-uploads only packets relayed by this device through the original Supabase RPC.
-An upload is marked synced only after a successful server response, and even a
-durable receipt is not presented as responder acknowledgement.
+Bluetooth scanning, advertising, and eligible packet forwarding do not depend
+on cloud reachability. Cloud upload does not depend on a privacy-mode switch.
+An upload is marked synced only after a successful Jac server response, and
+even a durable receipt is not presented as responder acknowledgement.
 
 ## Native boundary
 

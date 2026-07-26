@@ -17,9 +17,10 @@
 - Settings includes a notification self-test. On iOS it checks the current
   authorization and schedules through the same native queue used for received
   distress frames.
-- Background App Refresh status is reported in Settings. Bluetooth restoration
-  uses the Bluetooth background modes and is not a periodic background-fetch
-  loop.
+- Background App Refresh is checked at launch and whenever SafeRelay returns to
+  the foreground. A denied or restricted state becomes an actionable Settings
+  warning. Bluetooth restoration uses the Bluetooth background modes and is
+  not a periodic background-fetch loop.
 - The operating system controls suspension, radio scheduling, and termination.
   iOS does not relaunch any Bluetooth application after the user explicitly
   force-quits it; background, locked, and system-terminated states are the

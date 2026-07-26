@@ -57,6 +57,9 @@ icon = "icon.png"
 
 [client.vite.define]
 "__MAPBOX_ACCESS_TOKEN__" = "${MAPBOX_ACCESS_TOKEN:-pk.eyJ1IjoicmlzaGFiaGNsaSIsImEiOiJjbW1wa2xyeHAwZXVsMm9xNmViNXM3cDBnIn0.ecutlr2fPR_icmDlGeTi7g}"
+"__SAFERELAY_CLOUD_URL__" = "${SAFERELAY_CLOUD_URL:-}"
+"__SAFERELAY_CLOUD_PREVIEW_TOKEN__" = "${SAFERELAY_CLOUD_PREVIEW_TOKEN:-}"
+"__SAFERELAY_CLOUD_PREVIEW_COOKIE__" = "${SAFERELAY_CLOUD_PREVIEW_COOKIE:-}"
 
 [client.mobile]
 app_name = "SafeRelay"

@@ -9,6 +9,7 @@ import from "@capacitor/network" { Network }
 import from "@capawesome/capacitor-torch" { Torch }
 import from "@capgo/capacitor-bluetooth-low-energy" { BluetoothLowEnergy }
 
+glob _window: any = window;  # jac:ignore[W1037, W2001]
 glob BackgroundRelay: any = registerPlugin("SafeRelayBackground");  # jac:ignore[W1037]
 glob NativeMesh: any = registerPlugin("SafeRelayNativeMesh");  # jac:ignore[W1037]
 glob SERVICE_UUID: str = "12345678-1234-1234-1234-123456789ABC";
@@ -19,6 +20,9 @@ glob _mesh_running: bool = False;
 glob _mesh_starting: bool = False;
 glob _listeners_ready: bool = False;
 glob _notification_listeners_ready: bool = False;
+glob _compass_listener_ready: bool = False;
+glob _compass_sink: any = None;  # jac:ignore[W1037]
+glob _browser_orientation_handler: any = None;  # jac:ignore[W1037]
 glob _current_packet_bytes: list[int] = [];
 glob _connecting_ids: list[str] = [];
 glob _connected_ids: list[str] = [];
@@ -57,6 +61,17 @@ obj:pub LocationFix {
 }
 
 
+obj:pub PacketPublishState {
+    has accepted: bool,
+        native: bool,
+        persisted: bool,
+        connected_peers: int,
+        scanning: bool,
+        advertising: bool,
+        message: str;
+}
+
+
 obj:pub NotificationDeliveryState {
     has permission: str,
         scheduled: bool,
@@ -81,24 +96,6 @@ def:pub native_platform -> str {
 
 def:pub mesh_is_running -> bool {
     return _mesh_running;
-}
-
-
-async def:pub resume_saved_mesh -> MeshStartState | None {
-    if not is_native() {
-        return None;
-    }
-    try {
-        status = (
-            await NativeMesh.status()
-            if native_platform() == "ios"
-            else await BackgroundRelay.status()
-        );
-        if status.enabled {
-            return await start_mesh();
-        }
-    } except Exception {}
-    return None;
 }
 
 
@@ -494,64 +491,66 @@ async def:pub start_mesh -> MeshStartState {
 }
 
 
-async def:pub stop_mesh -> MeshStartState {
-    platform = native_platform();
+async def:pub publish_packet_state(
+    packet_bytes: list[int]
+) -> PacketPublishState {
+    _current_packet_bytes = packet_bytes;
     if not is_native() {
-        return MeshStartState(
-            state="unavailable",
-            message="No native radio is active in web preview.",
+        return PacketPublishState(
+            accepted=False,
             native=False,
-            platform=platform
+            persisted=False,
+            connected_peers=0,
+            scanning=False,
+            advertising=False,
+            message="Native Bluetooth is unavailable in the web preview."
         );
     }
-
-    if platform == "ios" {
-        try { await NativeMesh.stop(); }
-        except Exception {}
-    } else {
-        try { await BluetoothLowEnergy.stopScan(); }
-        except Exception {}
-        try { await BluetoothLowEnergy.stopAdvertising(); }
-        except Exception {}
+    if not _mesh_running {
+        return PacketPublishState(
+            accepted=False,
+            native=True,
+            persisted=False,
+            connected_peers=0,
+            scanning=False,
+            advertising=False,
+            message="Native Bluetooth relay is not active."
+        );
     }
-    if platform == "android" {
-        try { await BackgroundRelay.stop(); }
-        except Exception {}
-    }
-    for device_id in _connected_ids {
-        try { await BluetoothLowEnergy.disconnect({"deviceId": device_id}); }
-        except Exception {}
-    }
-    try {
-        if platform == "ios" { await NativeMesh.removeAllListeners(); }
-        else { await BluetoothLowEnergy.removeAllListeners(); }
-    }
-    except Exception {}
-    _connected_ids = [];
-    _connecting_ids = [];
-    _listeners_ready = False;
-    _mesh_running = False;
-    _emit("state", "Mesh relay stopped");
-    return MeshStartState(
-        state="idle",
-        message="Mesh relay is stopped.",
-        native=True,
-        platform=platform
-    );
-}
-
-
-async def:pub publish_packet(packet_bytes: list[int]) -> bool {
-    _current_packet_bytes = packet_bytes;
-    if not is_native() or not _mesh_running { return False; }
 
     if native_platform() == "ios" {
         try {
             result = await NativeMesh.publish({"value": packet_bytes});
-            return bool(result.published);
+            accepted = bool(result.published);
+            peers = int(result.connectedPeers or 0);
+            return PacketPublishState(
+                accepted=accepted,
+                native=True,
+                persisted=bool(result.persisted),
+                connected_peers=peers,
+                scanning=bool(result.scanning),
+                advertising=bool(result.advertising),
+                message=(
+                    (
+                        "Native relay accepted the packet with "
+                        + str(peers)
+                        + (" current peer link." if peers == 1 else " current peer links.")
+                    )
+                    if accepted
+                    else "Native relay did not accept the packet."
+                )
+            );
         } except Exception as error {
             _emit("warning", "Packet queued locally; native publish failed: " + str(error));
-            return False;
+            return PacketPublishState(
+                accepted=False,
+                native=True,
+                persisted=False,
+                connected_peers=0,
+                scanning=False,
+                advertising=False,
+                message="Native publish failed: " + str(error)
+            );
         }
     }
 
@@ -577,11 +576,32 @@ async def:pub publish_packet(packet_bytes: list[int]) -> bool {
                 });
             } except Exception {}
         }
-        return True;
+        return PacketPublishState(
+            accepted=True,
+            native=True,
+            persisted=False,
+            connected_peers=len(_connected_ids),
+            scanning=True,
+            advertising=True,
+            message="Native relay accepted the packet."
+        );
     } except Exception as error {
         _emit("warning", "Packet queued locally; native publish failed: " + str(error));
-        return False;
+        return PacketPublishState(
+            accepted=False,
+            native=True,
+            persisted=False,
+            connected_peers=len(_connected_ids),
+            scanning=False,
+            advertising=False,
+            message="Native publish failed: " + str(error)
+        );
     }
+}
+
+
+async def:pub publish_packet(packet_bytes: list[int]) -> bool {
+    return (await publish_packet_state(packet_bytes)).accepted;
 }
 
 
@@ -787,6 +807,107 @@ async def:pub set_torch(enabled: bool) -> bool {
 }
 
 
+async def:pub start_compass(sink: any) -> dict[str, object] {  # jac:ignore[W1037]
+    _compass_sink = sink;
+    try {
+        if is_native() and native_platform() == "ios" {
+            if not _compass_listener_ready {
+                await NativeMesh.addListener(
+                    "headingChanged",
+                    lambda (event: any) {  # jac:ignore[W1037]
+                        if _compass_sink {
+                            _compass_sink.call(None, {
+                                "heading": float(event.heading),
+                                "accuracy": float(event.accuracy)
+                            });
+                        }
+                    }
+                );
+                _compass_listener_ready = True;
+            }
+            result = await NativeMesh.startCompass();
+            return {
+                "active": bool(result.active),
+                "message": str(result.message)
+            };
+        }
+
+        orientation_event: any = _window.DeviceOrientationEvent;  # jac:ignore[W1037]
+        if orientation_event and orientation_event.requestPermission {
+            permission = await orientation_event.requestPermission();
+            if str(permission) != "granted" {
+                return {
+                    "active": False,
+                    "message": "Motion access was not granted."
+                };
+            }
+        }
+        if _browser_orientation_handler {
+            _window.removeEventListener(
+                "deviceorientation",
+                _browser_orientation_handler
+            );
+        }
+        _browser_orientation_handler = lambda (event: any) {  # jac:ignore[W1037]
+            browser_heading = (
+                float(event.webkitCompassHeading)
+                if event.webkitCompassHeading is not None
+                else float(event.alpha)
+                if event.alpha is not None
+                else -1.0
+            );
+            if browser_heading >= 0.0 and _compass_sink {
+                _compass_sink.call(None, {
+                    "heading": browser_heading,
+                    "accuracy": -1.0
+                });
+            }
+        };
+        _window.addEventListener(
+            "deviceorientation",
+            _browser_orientation_handler
+        );
+        return {
+            "active": True,
+            "message": "Live device heading active."
+        };
+    } except Exception as error {
+        _compass_sink = None;
+        return {
+            "active": False,
+            "message": "Compass unavailable: " + str(error)
+        };
+    }
+}
+
+
+async def:pub stop_compass -> dict[str, object] {
+    _compass_sink = None;
+    if is_native() and native_platform() == "ios" {
+        try {
+            result = await NativeMesh.stopCompass();
+            return {
+                "active": bool(result.active),
+                "message": str(result.message)
+            };
+        } except Exception as error {
+            return {
+                "active": False,
+                "message": "Compass stopped: " + str(error)
+            };
+        }
+    }
+    if _browser_orientation_handler {
+        _window.removeEventListener(
+            "deviceorientation",
+            _browser_orientation_handler
+        );
+        _browser_orientation_handler = None;
+    }
+    return {"active": False, "message": "Compass paused."};
+}
+
+
 async def:pub open_native_settings {
     if not is_native() { return; }
     try { await BluetoothLowEnergy.openAppSettings(); }
@@ -801,6 +922,20 @@ def:pub register_app_state_observer {
             "lifecycle",
             "App entered foreground" if event.isActive else "App entered background",
             {"isActive": bool(event.isActive)}
+        );
+    });
+}
+
+
+def:pub register_network_observer {
+    Network.addListener("networkStatusChange", lambda (event: any) {
+        _emit(
+            "network",
+            "Network became reachable" if event.connected else "Network became unavailable",
+            {
+                "connected": bool(event.connected),
+                "connectionType": str(event.connectionType or "unknown")
+            }
         );
     });
 }

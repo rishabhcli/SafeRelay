@@ -15,6 +15,9 @@ glob SEQUENCE_KEY: str = "saferelay.sequence";
 glob ONBOARDING_KEY: str = "saferelay.onboarding";
 glob:pub PRIVACY_KEY: str = "saferelay.privacy";
 glob:pub BATTERY_KEY: str = "saferelay.battery";
+glob:pub THEME_KEY: str = "saferelay.theme";
+glob:pub AUTO_DOWNLOAD_MAPS_KEY: str = "saferelay.auto-download-maps";
+glob:pub NOTIFICATIONS_KEY: str = "saferelay.notifications";
 glob:pub SYNC_ATTEMPTS_KEY: str = "saferelay.sync-attempts.v1";
 glob:pub SYNC_RECEIPTS_KEY: str = "saferelay.sync-receipts.v1";
 glob:pub ADJUDICATIONS_KEY: str = "saferelay.adjudications.v1";
@@ -99,6 +102,11 @@ async def:pub load_onboarding_complete -> bool {
 
 async def:pub complete_onboarding {
     await save_setting(ONBOARDING_KEY, "true");
+}
+
+
+async def:pub reset_onboarding {
+    await _preferences["remove"]({"key": ONBOARDING_KEY});
 }
 
 

@@ -26,8 +26,8 @@ and the BLE feature.
 
 Browser interaction verification should cover onboarding persistence, every
 primary tab, disaster refresh, offline tiles, ultrasonic controls, guarded
-distress, cloud privacy blocking, attempt ledger, responder handoff QR/digest,
-and zero error-level console messages.
+distress, automatic cloud retry, settings scrolling, the attempt ledger,
+responder handoff QR/digest, and zero error-level console messages.
 
 ## Physical iPhone radio matrix
 
@@ -62,9 +62,14 @@ a connected peer.
 | iPhone 15 Pro Max to iPhone 17 Pro Max, receiver foreground | Passed: emergency frame received and retained in local history |
 | Active foreign report while app is open | Passed: persistent red `SOMEONE ELSE NEEDS HELP` alert remained visible above the active view and opened the map |
 | Settings notification self-test while app is open | Passed: authorization returned `granted`, native scheduling returned `scheduled: true`, and an iOS banner appeared in the foreground |
+| Background App Refresh after rebuilt app relaunch | Passed on both phones: native status reported `available`; denied/restricted states now link to iOS Settings and refresh when the app becomes active |
+| Mobile incident map data | Passed on physical iPhone: only stored mesh reports and the device position are rendered; synthetic markers and hard-coded incident coordinates are absent |
 | iPhone 17 Pro Max to iPhone 15 Pro Max, receiver on Home Screen | Passed: native medical-emergency notification displayed and frame retained after relaunch |
 | iPhone 17 Pro Max to locked iPhone 15 Pro Max | Passed: a second native receipt notification woke the lock screen |
 | Bidirectional native transport | Passed: both send calls returned `published: true`; frames used the SafeRelay GATT service |
+| Settings scrolling | Passed in Device Hub on the installed iPhone 17 Pro Max artifact: the settings surface moved between delivery/display controls and lower storage/cloud sections |
+| JacHammer sandbox relay | Passed with the platform preview token: health accepted requests, first ingestion created a receipt, and replay returned the same duplicate receipt |
+| Reinstall of the current source artifact | Blocked: the arm64 iPhoneOS 27 build compiles, but Xcode has no signed-in account or provisioning profile for team `PV5R7RPV34` |
 | Wi-Fi/cellular unavailable for the complete matrix | Not proven in this run; Device Hub showed Wi-Fi available after development-profile verification |
 | System-terminated restoration in both directions | Not run |
 

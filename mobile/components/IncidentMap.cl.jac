@@ -28,7 +28,7 @@ glob _document: any = document;  # jac:ignore[W1037, W2001]
 
 def packet_center(packets: list[SosPacket]) -> list[float] {
     if len(packets) == 0 {
-        return [-122.4194, 37.7749];
+        return [0.0, 0.0];
     }
     latitude_total: float = 0.0;
     longitude_total: float = 0.0;
@@ -50,6 +50,7 @@ def:pub IncidentMap(
     location_ready: bool,
     location_message: str,
     on_locate: any,  # jac:ignore[W1037]
+    focus_packet_id: str = "",
 ) -> JsxElement {
     has container_ref: Ref[HTMLDivElement] = Ref();
     has map_ref: Ref[any] = Ref(None);  # jac:ignore[W1037]
@@ -61,44 +62,7 @@ def:pub IncidentMap(
     initial_center: list[float] = (
         [longitude, latitude] if location_ready else packet_center(packets)
     );
-    map_artifacts: list[dict[str, any]] = [  # jac:ignore[W1037]
-        {
-            "id": "map-artifact-rescue",
-            "label": "MAP ARTIFACT · RESCUE",
-            "longitude": initial_center[0] - 0.008,
-            "latitude": initial_center[1] + 0.004,
-            "color": "#ff4d5e",
-            "description": "Unable to evacuate without assistance.",
-            "meta": "2 people / access blocked",
-        },
-        {
-            "id": "map-artifact-medical",
-            "label": "MAP ARTIFACT · MEDICAL",
-            "longitude": initial_center[0] + 0.006,
-            "latitude": initial_center[1] + 0.007,
-            "color": "#f2cc60",
-            "description": "Urgent first-aid support requested.",
-            "meta": "1 person / conscious",
-        },
-        {
-            "id": "map-artifact-supplies",
-            "label": "MAP ARTIFACT · SUPPLIES",
-            "longitude": initial_center[0] + 0.009,
-            "latitude": initial_center[1] - 0.004,
-            "color": "#49a8ff",
-            "description": "Water and essential supplies requested.",
-            "meta": "4 people / low water",
-        },
-        {
-            "id": "map-artifact-safe",
-            "label": "MAP ARTIFACT · SAFE",
-            "longitude": initial_center[0] - 0.004,
-            "latitude": initial_center[1] - 0.007,
-            "color": "#48c78e",
-            "description": "Occupants have reported themselves safe.",
-            "meta": "3 people / no assistance",
-        },
-    ];
+    has_verified_signal: bool = location_ready or len(packets) > 0;
     selected_packet_label: str = "";
     selected_packet_coordinates: str = "";
     selected_packet_description: str = "";
@@ -122,33 +86,14 @@ def:pub IncidentMap(
             selected_packet_color = status_color(packet.status_code);
         }
     }
-    for map_artifact in map_artifacts {
-        if str(map_artifact["id"]) == selected_packet_id {
-            selected_packet_label = str(map_artifact["label"]);
-            selected_packet_coordinates = (
-                f"{float(map_artifact['latitude']):.5f}, "
-                + f"{float(map_artifact['longitude']):.5f}"
-            );
-            selected_packet_description = str(map_artifact["description"]);
-            selected_packet_source = "SYNTHETIC MAP ARTIFACT · NOT A REPORT";
-            selected_packet_meta = str(map_artifact["meta"]);
-            selected_packet_color = str(map_artifact["color"]);
-        }
-    }
 
     def center_map(_event: MouseEvent) {
         map_instance: any = map_ref.current;  # jac:ignore[W1037]
         if not map_instance { return; }
-        if len(packets) + len(map_artifacts) > 1 {
+        if len(packets) + (1 if location_ready else 0) > 1 {
             bounds: any = new(LngLatBounds);  # jac:ignore[W1037]
             for packet in packets {
                 bounds.extend([packet.longitude(), packet.latitude()]);
-            }
-            for map_artifact in map_artifacts {
-                bounds.extend([
-                    float(map_artifact["longitude"]),
-                    float(map_artifact["latitude"]),
-                ]);
             }
             if location_ready {
                 bounds.extend([longitude, latitude]);
@@ -159,12 +104,8 @@ def:pub IncidentMap(
             );
         } else {
             map_instance.easeTo({
-                "center": (
-                    [longitude, latitude]
-                    if location_ready
-                    else packet_center(packets)
-                ),
-                "zoom": 14.0,
+                "center": initial_center,
+                "zoom": 14.0 if has_verified_signal else 2.0,
                 "duration": 500,
             });
         }
@@ -210,7 +151,7 @@ def:pub IncidentMap(
                     "container": container_ref.current,
                     "style": "mapbox://styles/mapbox/outdoors-v12",
                     "center": initial_center,
-                    "zoom": 13.0,
+                    "zoom": 13.0 if has_verified_signal else 2.0,
                     "minZoom": 2.0,
                     "maxZoom": 18.0,
                     "dragRotate": False,
@@ -245,6 +186,26 @@ def:pub IncidentMap(
 
     useEffect(
         lambda {
+            if not focus_packet_id { return; }
+            map_instance: any = map_ref.current;  # jac:ignore[W1037]
+            if not map_instance { return; }
+            for packet in packets {
+                if packet.unique_id() == focus_packet_id {
+                    selected_packet_id = focus_packet_id;
+                    map_instance.easeTo({
+                        "center": [packet.longitude(), packet.latitude()],
+                        "zoom": max(15.5, float(map_instance.getZoom())),
+                        "duration": 650,
+                    });
+                    break;
+                }
+            }
+        },
+        [focus_packet_id, packets],
+    );
+
+    useEffect(
+        lambda {
             map_instance: any = map_ref.current;  # jac:ignore[W1037]
             if not map_instance { return; }
             for old_marker in marker_refs.current {
@@ -274,9 +235,13 @@ def:pub IncidentMap(
                     if packet_id == selected_packet_id
                     else "field-map-marker"
                 );
-                marker_element.style.backgroundColor = status_color(
-                    packet.status_code
+                marker_element.style.setProperty(
+                    "--marker-color",
+                    status_color(packet.status_code),
                 );
+                pin_element: any = _document.createElement("span");  # jac:ignore[W1037]
+                pin_element.className = "field-map-marker-pin";
+                marker_element.appendChild(pin_element);
                 marker_element.setAttribute(
                     "aria-label",
                     status_label(packet.status_code) + " packet " + packet_id,
@@ -295,48 +260,13 @@ def:pub IncidentMap(
                 );
                 marker: any = new(  # jac:ignore[W1037]
                     MapboxMarker,
-                    {"element": marker_element, "anchor": "center"},
+                    {"element": marker_element, "anchor": "bottom"},
                 );
                 marker.setLngLat([packet.longitude(), packet.latitude()]);
                 marker.addTo(map_instance);
                 next_markers.append(marker);
             }
 
-            for map_artifact in map_artifacts {
-                artifact_id: str = str(map_artifact["id"]);
-                artifact_label: str = str(map_artifact["label"]);
-                artifact_element: any = _document.createElement("button");  # jac:ignore[W1037]
-                artifact_element.type = "button";
-                artifact_element.className = (
-                    "field-map-marker is-demo is-selected"
-                    if artifact_id == selected_packet_id
-                    else "field-map-marker is-demo"
-                );
-                artifact_element.style.backgroundColor = str(map_artifact["color"]);
-                artifact_element.setAttribute("aria-label", artifact_label);
-                artifact_element.setAttribute(
-                    "aria-expanded",
-                    "true" if artifact_id == selected_packet_id else "false",
-                );
-                artifact_element.addEventListener(
-                    "click",
-                    lambda (_event: any) {
-                        selected_packet_id = (
-                            "" if selected_packet_id == artifact_id else artifact_id
-                        );
-                    },
-                );
-                artifact_marker: any = new(  # jac:ignore[W1037]
-                    MapboxMarker,
-                    {"element": artifact_element, "anchor": "center"},
-                );
-                artifact_marker.setLngLat([
-                    float(map_artifact["longitude"]),
-                    float(map_artifact["latitude"]),
-                ]);
-                artifact_marker.addTo(map_instance);
-                next_markers.append(artifact_marker);
-            }
             marker_refs.current = next_markers;
             return lambda {
                 for marker in next_markers {
@@ -349,9 +279,6 @@ def:pub IncidentMap(
 
     return <section className="field-map mode-default" aria-label="Explorable incident map">
         <div ref={container_ref} className="field-map-canvas"></div>
-        <div className="field-map-artifact-note">
-            RINGED MARKERS: MAP ARTIFACTS · NOT REPORTS
-        </div>
         <div className="field-map-controls" role="group" aria-label="Map controls">
             <button title="Zoom in" aria-label="Zoom in" onClick={zoom_in}>
                 <ZoomIn size={20} />
@@ -415,6 +342,14 @@ def:pub IncidentMap(
             <div className="field-map-unavailable">
                 <MapPin size={20} />
                 <strong>MAP TOKEN REQUIRED</strong>
+            </div>
+        } elif not has_verified_signal {
+            <div className="field-map-empty">
+                <MapPin size={18} />
+                <div>
+                    <strong>NO VERIFIED MAP SIGNALS</strong>
+                    <span>Enable location or receive a mesh report.</span>
+                </div>
             </div>
         }}
     </section>;

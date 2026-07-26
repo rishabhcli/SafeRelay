@@ -7,8 +7,8 @@ The first screen is the field application itself: device setup, command and
 evidence boards, local and disaster maps, offline tools, a guarded distress
 action, cloud receipt ledgers, responder handoff, and native systems
 diagnostics. The browser build is a truthful preview and does not simulate
-Bluetooth success. Synthetic records are confined to clearly labeled map
-artifacts; every non-map operational value is source-backed or shown as unknown.
+Bluetooth success. The runtime map shows only the device location and received
+mesh reports; operational values are source-backed or shown as unknown.
 
 ## Stack
 
@@ -19,7 +19,7 @@ artifacts; every non-map operational value is source-backed or shown as unknown.
 - iOS `bluetooth-central` and `bluetooth-peripheral` background modes
 - Capacitor Preferences, Filesystem, Share, and native Printer plugins
 - Mapbox GL for the explorable incident map
-- USGS, NOAA, GDACS, OpenStreetMap offline tiles, and the privacy-gated Supabase bridge
+- USGS, NOAA, GDACS, OpenStreetMap offline tiles, and automatic Jac cloud relay
 
 The generated `android/` and `ios/` directories contain only the native bridge
 code required by Capacitor. There is no Flutter or Dart source, package
@@ -35,7 +35,12 @@ bun install
 cp -n .env.example .env
 ```
 
-Set `MAPBOX_ACCESS_TOKEN` in `.env` before building the client.
+Set `MAPBOX_ACCESS_TOKEN` and the deployed JacHammer
+`SAFERELAY_CLOUD_URL` in `.env` before building the client.
+Permanent public deployments do not need any additional credential. A temporary
+JacHammer sandbox can use `SAFERELAY_CLOUD_PREVIEW_TOKEN`, or its host-scoped
+`SAFERELAY_CLOUD_PREVIEW_COOKIE`, for a local device build. Never commit either
+short-lived value.
 
 Start the live browser preview:
 

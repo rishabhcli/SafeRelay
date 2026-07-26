@@ -104,16 +104,16 @@ test "field brief labels drills and preserves unknowns" {
 }
 
 
-test "cloud queue respects privacy connectivity initialization and sync state" {
+test "cloud queue is gated only by cloud reachability and configuration" {
     packets = [
         packet(1, 1, 1, 1),
         packet(2, 1, 2, 1, True)
     ];
-    blocked = assess_cloud_queue(packets, False, "Relay Only", False);
+    blocked = assess_cloud_queue(packets, False, False);
     assert blocked.queued == 1;
     assert blocked.eligible == 0;
-    assert len(blocked.blockers) == 3;
-    ready = assess_cloud_queue(packets, True, "Cloud Bridge", True);
+    assert len(blocked.blockers) == 2;
+    ready = assess_cloud_queue(packets, True, True);
     assert ready.state == "ready";
     assert ready.eligible == 1;
 }
@@ -214,12 +214,12 @@ test "field brief surfaces critical and stale review work" {
 }
 
 
-test "empty cloud queue remains empty even when policy is blocked" {
-    queue = assess_cloud_queue([], False, "Local Only", False);
+test "empty cloud queue remains empty while cloud is unreachable" {
+    queue = assess_cloud_queue([], False, False);
     assert queue.state == "empty";
     assert queue.queued == 0;
     assert queue.eligible == 0;
-    assert len(queue.blockers) == 3;
+    assert len(queue.blockers) == 2;
 }
 
 

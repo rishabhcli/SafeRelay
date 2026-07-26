@@ -113,7 +113,7 @@ test "newer sender sequence replaces stale local evidence" {
 }
 
 
-test "local only privacy blocks forwarding" {
+test "legacy privacy labels cannot disable Bluetooth forwarding" {
     result = evaluate_relay(
         fixture(1),
         1778906460,
@@ -121,8 +121,8 @@ test "local only privacy blocks forwarding" {
         "Bridge",
         0
     );
-    assert result.decision == "blocked";
-    assert not result.should_relay();
+    assert result.decision == "relay";
+    assert result.should_relay();
 }
 
 
