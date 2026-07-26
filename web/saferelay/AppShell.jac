@@ -3,7 +3,7 @@
 import from "@jac/runtime" { AuthGuard, Router, Routes, Route }
 import from .LandingPage { LandingPage }
 import from .LoginPage { LoginPage }
-import from .CommandCenter { CommandCenter }
+import from .VerifiedCommandCenter { VerifiedCommandCenter }
 
 
 def:pub SafeRelayApp -> JsxElement {
@@ -12,7 +12,7 @@ def:pub SafeRelayApp -> JsxElement {
             <Route path="/" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route element={<AuthGuard redirect="/login" />}>
-                <Route path="/ops" element={<CommandCenter />} />
+                <Route path="/ops" element={<VerifiedCommandCenter />} />
             </Route>
             <Route path="*" element={<LandingPage />} />
         </Routes>

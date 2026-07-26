@@ -8,10 +8,16 @@ import from "lucide-react" {
     Check,
     ChevronRight,
     CircleGauge,
+    CloudLightning,
+    Flame,
     LocateFixed,
+    Map as MapIcon,
     Network,
     Radio,
+    RotateCcw,
+    Route,
     Satellite,
+    Send,
     ShieldCheck,
     Signal,
     Smartphone,
@@ -19,12 +25,12 @@ import from "lucide-react" {
 }
 
 
-def:pub MeshSignalDemo -> JsxElement {
+def:pub RelayPlayground -> JsxElement {
     has phase: int = 0,
         scenario: str = "wildfire";
 
     def advance(_e: MouseEvent) {
-        phase = (phase + 1) % 4;
+        phase = 0 if phase >= 3 else phase + 1;
     }
 
     def choose_scenario(next_scenario: str) {
@@ -32,224 +38,248 @@ def:pub MeshSignalDemo -> JsxElement {
         phase = 0;
     }
 
-    scenario_label: str = "Paradise Fire" if scenario == "wildfire" else (
-        "Oklahoma Tornado" if scenario == "tornado" else (
-            "Galveston Hurricane" if scenario == "hurricane" else "San Andreas Quake"
+    scenario_label: str = "Wildfire ridge" if scenario == "wildfire" else (
+        "Quake corridor" if scenario == "earthquake" else "Storm coast"
+    );
+    action_label: str = "Inspect map artifact" if phase == 0 else (
+        "Next map artifact" if phase < 3 else "Reset map layer"
+    );
+    artifact_status: str = "Origin marker selected" if phase == 0 else (
+        "Nearby-phone marker selected" if phase == 1 else (
+            "Field-relay marker selected" if phase == 2 else "Gateway marker selected"
         )
     );
-    origin_label: str = {
-        "wildfire": "EVAC SOS",
-        "tornado": "SHELTER SOS",
-        "hurricane": "FLOOD SOS",
-        "earthquake": "RESCUE SOS",
-    }[scenario];
+    pip_line: str = "Map layer only. No live evidence.";
 
-    return <div className="mesh-demo" aria-label="Interactive mesh relay simulation">
-        <div className="mesh-demo__header">
-            <div>
-                <span className="eyebrow">LIVE TOPOLOGY</span>
-                <h2>{scenario_label} · AM-7C21</h2>
+    return <section id="map-artifacts" className="relay-hero">
+        <div className="relay-hero__copy">
+            <div className="relay-kicker">
+                <span className="relay-kicker__light"></span>
+                SYNTHETIC MAP LAYER · NOT REPORTS
             </div>
-            <span className="live-indicator"><span></span> DRILL ACTIVE</span>
+            <h1><span>Safe</span>Relay</h1>
+            <p>
+                Explore hypothetical marker placement on a disaster map.
+                Operational reports remain empty until real evidence arrives.
+            </p>
+            <div className="relay-hero__actions">
+                <button type="button" className="relay-launch" onClick={advance}>
+                    {<RotateCcw size={17} /> if phase >= 3 else <Send size={17} />}
+                    {action_label}
+                </button>
+                <Link to="/ops" className="relay-text-link">
+                    Open evidence monitor <ArrowRight size={16} />
+                </Link>
+            </div>
+            <div className="relay-hero__proof">
+                <span><Check size={13} /> BLE mesh</span>
+                <span><Check size={13} /> Signed path</span>
+                <span><Check size={13} /> Jac graph</span>
+            </div>
         </div>
-        <div className="public-scenario-selector" role="tablist" aria-label="Disaster scenario">
-            {for option in ["wildfire", "tornado", "hurricane", "earthquake"] {
-                <button key={option} role="tab" aria-selected={scenario == option} className={"is-active" if scenario == option else ""} onClick={lambda (_e: MouseEvent) { choose_scenario(option); }}>{option.title()}</button>
-            }}
-        </div>
-        <div className="mesh-canvas">
-            <div className="terrain terrain--one"></div>
-            <div className="terrain terrain--two"></div>
-            <div className="mesh-route mesh-route--one"></div>
-            <div className="mesh-route mesh-route--two"></div>
-            <div className="mesh-route mesh-route--three"></div>
 
-            <button
-                className={"mesh-node mesh-node--origin is-active" if phase >= 0 else "mesh-node mesh-node--origin"}
-                onClick={advance}
-                aria-label="Advance origin signal"
-            >
-                <Smartphone size={18} />
-                <span>{origin_label}</span>
-                <small>38% battery</small>
-            </button>
-            <button
-                className={"mesh-node mesh-node--relay-a is-active" if phase >= 1 else "mesh-node mesh-node--relay-a"}
-                onClick={advance}
-                aria-label="Advance first relay"
-            >
-                <Radio size={18} />
-                <span>RELAY 01</span>
-                <small>-68 dBm</small>
-            </button>
-            <button
-                className={"mesh-node mesh-node--relay-b is-active" if phase >= 2 else "mesh-node mesh-node--relay-b"}
-                onClick={advance}
-                aria-label="Advance second relay"
-            >
-                <Radio size={18} />
-                <span>RELAY 02</span>
-                <small>-73 dBm</small>
-            </button>
-            <button
-                className={"mesh-node mesh-node--gateway is-active" if phase >= 3 else "mesh-node mesh-node--gateway"}
-                onClick={advance}
-                aria-label="Advance gateway delivery"
-            >
-                <Satellite size={18} />
-                <span>GATEWAY</span>
-                <small>uplink ready</small>
-            </button>
-            <div className="map-label map-label--north">{scenario_label.upper()}</div>
-            <div className="map-label map-label--canyon">OUTAGE CORRIDOR</div>
-        </div>
-        <div className="packet-status">
-            <div>
-                <span>PACKET STATE</span>
-                <strong>{["Broadcasting", "Relayed by AM-1F09", "Crossing outage", "Delivered to command"][phase]}</strong>
+        <div
+            className={"relay-stage relay-stage--" + scenario}
+            aria-label={"Synthetic map artifact layer: " + scenario_label}
+        >
+            <div className="relay-stage__topline">
+                <div>
+                    <span>MAP ARTIFACTS / 001</span>
+                    <strong>{scenario_label}</strong>
+                </div>
+                <div className="relay-scenarios" role="tablist" aria-label="Synthetic scenario">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={scenario == "wildfire"}
+                        className={"is-active" if scenario == "wildfire" else ""}
+                        onClick={lambda (_e: MouseEvent) { choose_scenario("wildfire"); }}
+                    ><Flame size={14} /> Fire</button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={scenario == "earthquake"}
+                        className={"is-active" if scenario == "earthquake" else ""}
+                        onClick={lambda (_e: MouseEvent) { choose_scenario("earthquake"); }}
+                    ><Activity size={14} /> Quake</button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={scenario == "storm"}
+                        className={"is-active" if scenario == "storm" else ""}
+                        onClick={lambda (_e: MouseEvent) { choose_scenario("storm"); }}
+                    ><CloudLightning size={14} /> Storm</button>
+                </div>
             </div>
-            <div className="packet-steps">
-                {for idx in range(4) {
-                    <span key={idx} className={"complete" if idx <= phase else ""}></span>
-                }}
+
+            <div className="relay-outage">
+                <MapIcon size={19} />
+                <span>MAP-ONLY SYNTHETIC LAYER</span>
             </div>
-            <button className="icon-action" onClick={advance} title="Advance packet">
-                <ChevronRight size={18} />
-            </button>
+
+            <div className={"relay-route relay-route--one is-reached" if phase >= 1 else "relay-route relay-route--one"}></div>
+            <div className={"relay-route relay-route--two is-reached" if phase >= 2 else "relay-route relay-route--two"}></div>
+            <div className={"relay-route relay-route--three is-reached" if phase >= 3 else "relay-route relay-route--three"}></div>
+
+            <div className="relay-node relay-node--origin is-reached">
+                <span className="relay-node__icon"><Smartphone size={18} /></span>
+                <strong>ARTIFACT 01</strong>
+                <small>not a report</small>
+            </div>
+            <div className={"relay-node relay-node--one is-reached" if phase >= 1 else "relay-node relay-node--one"}>
+                <span className="relay-node__icon"><Bluetooth size={18} /></span>
+                <strong>ARTIFACT 02</strong>
+                <small>not a report</small>
+            </div>
+            <div className={"relay-node relay-node--two is-reached" if phase >= 2 else "relay-node relay-node--two"}>
+                <span className="relay-node__icon"><Radio size={18} /></span>
+                <strong>ARTIFACT 03</strong>
+                <small>not a report</small>
+            </div>
+            <div className={"relay-node relay-node--gateway is-reached" if phase >= 3 else "relay-node relay-node--gateway"}>
+                <span className="relay-node__icon"><Satellite size={18} /></span>
+                <strong>ARTIFACT 04</strong>
+                <small>not a report</small>
+            </div>
+
+            <div className={"pip-runner pip-runner--" + str(phase)}>
+                <span className="pip-message">{pip_line}</span>
+                <span
+                    className="pip-art"
+                    role="img"
+                    aria-label="Pip, SafeRelay's pixel-art rescue pigeon mascot"
+                ></span>
+            </div>
+
+            <div className={"relay-delivery-burst is-visible" if phase >= 3 else "relay-delivery-burst"} aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+            </div>
+
+            <div className="relay-stage__hud" aria-live="polite">
+                <span>MAP SELECTION</span>
+                <strong>{artifact_status}</strong>
+                <div className="relay-progress" aria-label={str(phase + 1) + " of 4 map artifacts selected"}>
+                    {for idx in range(4) {
+                        <span key={idx} className={"is-complete" if idx <= phase else ""}></span>
+                    }}
+                </div>
+            </div>
         </div>
-    </div>;
+    </section>;
 }
 
 
 def:pub LandingPage -> JsxElement {
-    return <div className="landing">
-        <header className="public-nav">
-            <Link to="/" className="brand-lockup">
-                <span className="brand-mark"><Waypoints size={20} /></span>
+    return <div className="relay-landing">
+        <header className="relay-nav">
+            <Link to="/" className="relay-brand">
+                <span className="relay-brand__mark"><Waypoints size={19} /></span>
                 <span>SAFE<strong>RELAY</strong></span>
             </Link>
-            <nav>
-                <a href="#network">Network</a>
-                <a href="#readiness">Readiness</a>
-                <Link to="/ops">Operations</Link>
+            <nav aria-label="Public navigation">
+                <a href="#map-artifacts">Map artifacts</a>
+                <a href="#network">How it works</a>
+                <a href="#readiness">Evidence</a>
             </nav>
-            <Link to="/ops" className="button button--compact button--dark">
-                Open command <ArrowRight size={15} />
+            <Link to="/ops" className="relay-command-link">
+                Command <ArrowRight size={15} />
             </Link>
         </header>
 
         <main>
-            <section className="hero">
-                <div className="hero__copy">
-                    <div className="status-kicker">
-                        <span className="status-dot"></span>
-                        RESILIENT COMMUNICATIONS
-                    </div>
-                    <h1>SafeRelay</h1>
-                    <p className="hero__lede">
-                        Emergency signals move phone to phone when cellular infrastructure fails,
-                        then surface in one operator-grade command view.
+            <RelayPlayground />
+
+            <section className="relay-source-strip" aria-label="Evidence boundaries">
+                <div><span>PUBLIC HAZARDS</span><strong>USGS + NWS</strong></div>
+                <div><span>RELAY REPORTS</span><strong>UNKNOWN UNTIL RECEIVED</strong></div>
+                <div><span>OPERATIONS</span><strong>PER-OPERATOR GRAPH</strong></div>
+                <div className="relay-source-strip__marquee" aria-hidden="true">
+                    <span>MESSAGE MOVES · PATH STAYS · MESSAGE MOVES · PATH STAYS ·</span>
+                </div>
+            </section>
+
+            <section id="network" className="relay-system">
+                <div className="relay-section-heading">
+                    <span className="relay-section-number">01 / THE RELAY</span>
+                    <h2>Your phone becomes a way through.</h2>
+                    <p>
+                        SafeRelay treats every nearby device as a possible bridge.
+                        The packet moves; its provenance travels with it.
                     </p>
-                    <div className="hero__actions">
-                        <Link to="/ops" className="button button--primary">
-                            Enter live drill <ArrowRight size={17} />
-                        </Link>
-                        <a href="#network" className="text-link">
-                            View relay architecture <ChevronRight size={16} />
-                        </a>
-                    </div>
-                    <div className="hero__proof">
-                        <span><Check size={14} /> Offline BLE relay</span>
-                        <span><Check size={14} /> Graph-native operations</span>
-                        <span><Check size={14} /> Typed Jac agent</span>
-                    </div>
                 </div>
-                <MeshSignalDemo />
-            </section>
-
-            <section className="signal-strip" aria-label="Network status">
-                <div><span>DRILL NETWORK</span><strong>158</strong><small>phones online</small></div>
-                <div><span>DELIVERY</span><strong>100%</strong><small>via mesh path</small></div>
-                <div><span>MEDIAN ROUTE</span><strong>3.2</strong><small>BLE hops</small></div>
-                <div><span>WEAKEST ZONE</span><strong>64%</strong><small>Canyon health</small></div>
-            </section>
-
-            <section id="network" className="system-band">
-                <div className="section-heading">
-                    <span className="eyebrow">THE RESILIENCE LOOP</span>
-                    <h2>A signal path built for the moment the network disappears.</h2>
-                    <p>Each phone becomes both beacon and bridge. Jac walkers make the relay path a queryable operations graph.</p>
-                </div>
-                <div className="system-flow">
+                <div className="relay-flow">
                     <article>
-                        <span className="flow-index">01</span>
-                        <Smartphone size={24} />
-                        <h3>Origin</h3>
-                        <p>An SOS is signed, prioritized, and broadcast over Bluetooth Low Energy.</p>
+                        <span>01</span>
+                        <Smartphone size={25} />
+                        <h3>Seal</h3>
+                        <p>The origin phone signs and prioritizes the emergency packet.</p>
                     </article>
-                    <ArrowRight className="flow-arrow" size={20} />
+                    <ChevronRight className="relay-flow__arrow" size={20} />
                     <article>
-                        <span className="flow-index">02</span>
-                        <Bluetooth size={24} />
-                        <h3>Relay</h3>
-                        <p>Nearby phones carry the packet across the disconnected area.</p>
+                        <span>02</span>
+                        <Bluetooth size={25} />
+                        <h3>Carry</h3>
+                        <p>Nearby phones pass it across the disconnected area over BLE.</p>
                     </article>
-                    <ArrowRight className="flow-arrow" size={20} />
+                    <ChevronRight className="relay-flow__arrow" size={20} />
                     <article>
-                        <span className="flow-index">03</span>
-                        <Satellite size={24} />
-                        <h3>Gateway</h3>
-                        <p>The first reachable uplink delivers the complete path to command.</p>
+                        <span>03</span>
+                        <Route size={25} />
+                        <h3>Remember</h3>
+                        <p>Every handoff becomes part of a queryable relay path.</p>
                     </article>
-                    <ArrowRight className="flow-arrow" size={20} />
+                    <ChevronRight className="relay-flow__arrow" size={20} />
                     <article>
-                        <span className="flow-index">04</span>
-                        <ShieldCheck size={24} />
-                        <h3>Response</h3>
-                        <p>Operators triage, assign, and resolve against shared graph state.</p>
+                        <span>04</span>
+                        <ShieldCheck size={25} />
+                        <h3>Surface</h3>
+                        <p>The first uplink brings the message and its route to command.</p>
                     </article>
                 </div>
             </section>
 
-            <section id="readiness" className="capability-band">
-                <div className="capability-visual">
-                    <div className="radar">
-                        <span className="radar__ring radar__ring--a"></span>
-                        <span className="radar__ring radar__ring--b"></span>
-                        <span className="radar__sweep"></span>
-                        <span className="radar__point radar__point--a"></span>
-                        <span className="radar__point radar__point--b"></span>
-                        <span className="radar__point radar__point--c"></span>
-                        <Network size={38} />
+            <section id="readiness" className="relay-truth">
+                <div className="relay-truth__visual">
+                    <div className="relay-orbit" aria-hidden="true">
+                        <span className="relay-orbit__ring relay-orbit__ring--one"></span>
+                        <span className="relay-orbit__ring relay-orbit__ring--two"></span>
+                        <span className="relay-orbit__sweep"></span>
+                        <span className="relay-orbit__point relay-orbit__point--one"></span>
+                        <span className="relay-orbit__point relay-orbit__point--two"></span>
+                        <Network size={42} />
                     </div>
-                    <div className="readout">
-                        <span>NETWORK READINESS</span>
-                        <strong>84</strong>
-                        <small>MODELED SCORE</small>
+                    <div className="relay-truth__stamp">
+                        <span>EVIDENCE POLICY</span>
+                        <strong>REAL</strong>
+                        <small>OR EXPLICITLY UNKNOWN</small>
                     </div>
                 </div>
-                <div className="capability-copy">
-                    <span className="eyebrow">ONE CONTINUOUS JAC SYSTEM</span>
-                    <h2>Topology, persistence, decisions, and interface share one type system.</h2>
-                    <div className="capability-list">
-                        <div><CircleGauge size={20} /><span><strong>Operational state</strong> Persistent incidents, alerts, responders, and activity.</span></div>
-                        <div><LocateFixed size={20} /><span><strong>Relay provenance</strong> Walk every hop from origin phone to gateway.</span></div>
-                        <div><Activity size={20} /><span><strong>Advisory agent</strong> Structured briefings grounded in the current drill graph.</span></div>
-                        <div><Signal size={20} /><span><strong>Resilient demo</strong> Complete deterministic operation without provider credentials.</span></div>
+                <div className="relay-truth__copy">
+                    <span className="relay-section-number">02 / THE GRAPH</span>
+                    <h2>Built to know what it does not know.</h2>
+                    <p>
+                        The public map layer is synthetic. The operations workspace is not:
+                        source records keep their provenance and missing evidence stays missing.
+                    </p>
+                    <div className="relay-capabilities">
+                        <div><CircleGauge size={19} /><span><strong>Persistent state</strong> Verified public-source hazard records.</span></div>
+                        <div><LocateFixed size={19} /><span><strong>Relay provenance</strong> Unknown until observed packet evidence exists.</span></div>
+                        <div><Activity size={19} /><span><strong>Source-bound feeds</strong> USGS and NWS records keep their origin.</span></div>
+                        <div><Signal size={19} /><span><strong>Honest empty states</strong> No generated reports, receipts, or outcomes.</span></div>
                     </div>
-                    <Link to="/ops" className="button button--light">
-                        Inspect the operation <ArrowRight size={17} />
+                    <Link to="/ops" className="relay-light-button">
+                        Inspect the evidence <ArrowRight size={17} />
                     </Link>
                 </div>
             </section>
         </main>
 
-        <footer className="public-footer">
-            <div className="brand-lockup">
-                <span className="brand-mark"><Waypoints size={20} /></span>
+        <footer className="relay-footer">
+            <div className="relay-brand relay-brand--footer">
+                <span className="relay-brand__mark"><Waypoints size={19} /></span>
                 <span>SAFE<strong>RELAY</strong></span>
             </div>
-            <p>Simulation and training system. Not an official emergency service.</p>
+            <p>Synthetic map layer. Not an emergency service.</p>
             <span>Built end to end in Jac.</span>
         </footer>
     </div>;

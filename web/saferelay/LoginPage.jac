@@ -98,7 +98,7 @@ def:pub LoginPage -> JsxElement {
                 <h1>Enter your command workspace.</h1>
                 <p>
                     Each operator account receives an isolated, persistent Jac graph for
-                    drills, relay traces, decisions, and agent briefings.
+                    verified source records and evidence-scoped operations.
                 </p>
                 <div className="auth-assurances">
                     <span><LockKeyhole size={16} /> Authenticated Jac endpoints</span>
@@ -125,8 +125,8 @@ def:pub LoginPage -> JsxElement {
                     <span className="eyebrow">OPERATOR ACCESS</span>
                     <h2>{"Create your workspace" if mode == "signup" else "Welcome back"}</h2>
                     <p>
-                        {"Start with a private wildfire drill graph." if mode == "signup"
-                        else "Continue in your isolated command graph."}
+                        {"Start with an empty evidence workspace." if mode == "signup"
+                        else "Continue in your isolated evidence workspace."}
                     </p>
                 </div>
 
@@ -183,7 +183,7 @@ def:pub LoginPage -> JsxElement {
                         }}
                     </button>
                 </form>
-                <p className="auth-disclaimer">Simulation and training only. Not an emergency service.</p>
+                <p className="auth-disclaimer">No generated operational records. Not an emergency service.</p>
             </section>
         </main>
     </div>;

@@ -8,9 +8,6 @@ jac-version = "==0.34.7"
 license = "SEE LICENSE IN LICENSE"
 readme = "README.md"
 
-[dependencies]
-requests = ">=2.32,<3"
-
 [dependencies.npm]
 "lucide-react" = "^0.562.0"
 "mapbox-gl" = "^3.27.0"
@@ -31,31 +28,19 @@ typescript = "^5.3.3"
 [dev-dependencies]
 watchdog = ">=3.0.0"
 
-[check]
-# Scenario construction is intentionally explicit so frozen run artifacts remain
-# readable and schema-stable across Jac releases.
-suppress = ["W3030"]
-
 [serve]
 port = 8000
 base_route_app = "app"
 
 [client.app_meta_data]
 title = "SafeRelay | Resilience Operations"
-description = "Graph-native emergency mesh operations and agentic drill command in Jac."
-keywords = "emergency mesh, incident command, Jac, graph operations, disaster drill"
+description = "Evidence-scoped emergency mesh operations and public hazard monitoring in Jac."
+keywords = "emergency mesh, incident evidence, Jac, public hazard monitoring"
 author = "SafeRelay Team"
 theme_color = "#0a0d0f"
 
 [client.vite.define]
 "__MAPBOX_ACCESS_TOKEN__" = "${MAPBOX_ACCESS_TOKEN:-pk.eyJ1IjoicmlzaGFiaGNsaSIsImEiOiJjbW1wa2xyeHAwZXVsMm9xNmViNXM3cDBnIn0.ecutlr2fPR_icmDlGeTi7g}"
-
-[byllm.model]
-default_model = "${BYLLM_DEFAULT_MODEL:-gpt-4o-mini}"
-
-[byllm.call_params]
-temperature = 0.2
-max_tokens = 900
 
 [scale.jwt]
 secret = "${JWT_SECRET:?JWT_SECRET must be set before SafeRelay starts}"
@@ -102,10 +87,6 @@ redis_enabled = false
 [scale.secrets]
 JWT_SECRET = "${JWT_SECRET:?JWT_SECRET must be set before deployment}"
 PROMETHEUS_ADMIN_PASSWORD = "${PROMETHEUS_ADMIN_PASSWORD:?PROMETHEUS_ADMIN_PASSWORD must be set before deployment}"
-OPENAI_API_KEY = "${OPENAI_API_KEY:-}"
-ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY:-}"
-GOOGLE_API_KEY = "${GOOGLE_API_KEY:-}"
-
 [test]
 directory = "saferelay"
 filter = "store_test.jac"

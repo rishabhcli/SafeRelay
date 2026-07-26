@@ -1,42 +1,36 @@
 # SafeRelay
 
-**Graph-native emergency mesh operations, built entirely with Jac.**
+**Evidence-scoped emergency mesh operations, built entirely with Jac.**
 
-SafeRelay turns a simulated phone-to-phone emergency relay into a queryable
-operations graph. Operators can generate disaster scenarios, triage and replay
-SOS traffic, plan responder coverage, compare frozen runs, sign after-action
-reviews, transfer handoffs, monitor public hazard feeds, and ask a typed
-incident agent for a grounded action plan from one Jac application.
+SafeRelay's active web console monitors source-backed public hazard records and
+preserves explicit unknown states for relay reports, receipts, responder
+acknowledgements, and outcomes. It never substitutes generated operational
+records. Synthetic artifacts are allowed only inside clearly labeled map
+layers.
 
 Created by Jerry Wen, Rishabh Bansal, and Aditya Das for the Alameda County
 Hackathon 2025.
 
-> The current experience is a simulated emergency exercise. It demonstrates
-> the software workflow and does not connect to real devices or dispatch
-> emergency services.
+> The web console is not an emergency dispatch service. An empty evidence state
+> stays empty until a real source record exists.
 
 ## Why Jac
 
 SafeRelay uses Jac 0.34.7 as the full application runtime:
 
-- **One language:** backend logic, graph schema, agent abilities, tests, routes,
+- **One language:** backend logic, graph schema, tests, routes,
   and JSX-like client components are all Jac.
-- **Graph persistence:** incidents connect to alerts, responders, activity, and
-  relay hops through typed nodes and edges rooted in Jac's persistent graph.
-- **Walker-native provenance:** `TraceRelay` traverses the actual alert-to-hop
-  topology instead of reconstructing a path in the browser.
+- **Graph persistence:** authenticated source records attach to the operator's
+  persistent Jac root.
 - **Typed protected RPC:** `def:protect` functions become authenticated,
   client-callable endpoints with generated types.
 - **Per-operator isolation:** Jac authentication maps every operator to a
-  private persistent root graph; unauthenticated visitors cannot mutate drills.
-- **Structured agent output:** `by llm()` returns an `AgentBriefing` object. A
-  deterministic Jac fallback keeps local drills usable without a model provider.
-- **One runtime:** `jac start` builds the client and serves the UI, APIs, walker,
-  and graph state together.
-- **Frozen training evidence:** presets, archived alerts, event ledgers,
-  reviews, and handoffs remain attached to the authenticated operator graph.
+  private persistent root graph.
+- **One runtime:** `jac start` builds the client and serves the UI, APIs, and
+  graph state together.
 - **Live public feeds:** USGS earthquake and NWS severe-weather refreshes run on
-  the Jac server with bounded timeouts and an offline continuity snapshot.
+  the Jac server with bounded timeouts. Failed refreshes retain verified cached
+  records or report unavailable; they never create continuity examples.
 
 ## Run It
 
@@ -53,14 +47,12 @@ jac start --dev main.jac
 Open:
 
 - Landing experience: [http://localhost:8000](http://localhost:8000)
-- Operations drill: [http://localhost:8000/ops](http://localhost:8000/ops)
+- Operations evidence monitor: [http://localhost:8000/ops](http://localhost:8000/ops)
 
 No database, JavaScript build command, or Supabase project is required for a
 single-replica deployment. The incident map uses a public Mapbox access token
-from `MAPBOX_ACCESS_TOKEN`. To use a live model, configure a provider supported
-by Jac's byLLM runtime, set `BYLLM_DEFAULT_MODEL`, and set
-`SAFERELAY_LIVE_AGENT=true`. Without that explicit gate, the typed deterministic
-briefing is used.
+from `MAPBOX_ACCESS_TOKEN`. Its synthetic markers are visibly labeled map
+artifacts and are never included in operational counts or evidence.
 
 ## Verify It
 
@@ -70,10 +62,8 @@ jac test
 jac build main.jac
 ```
 
-The ten-workflow parity suite validates scenario generation, all four disaster
-profiles, alert lifecycle and relay provenance, live simulation, preset JSON
-round trips, archive/comparison/replay, capacity-aware responders, reviews,
-handoffs, and disaster-feed continuity. See [PARITY.md](./PARITY.md).
+The test suite verifies that unavailable sources return zero records and that
+legacy generated continuity records are purged. See [PARITY.md](./PARITY.md).
 
 ## Architecture
 
@@ -81,38 +71,28 @@ handoffs, and disaster-feed continuity. See [PARITY.md](./PARITY.md).
 flowchart LR
     UI["Jac client components"] --> AUTH["Jac authentication"]
     AUTH --> RPC["Typed def:protect RPC"]
-    AUTH --> WALKER["Protected TraceRelay walker"]
     RPC --> ROOT["Per-operator persistent root graph"]
-    WALKER --> ROOT
-    ROOT --> INCIDENT["Incident"]
-    INCIDENT --> ALERTS["Alert nodes"]
-    ALERTS --> HOPS["RelayHop nodes"]
-    INCIDENT --> TEAMS["Responder nodes"]
-    INCIDENT --> EVENTS["ActivityEvent nodes"]
-    ROOT --> PRESETS["ScenarioPreset nodes"]
-    ROOT --> RUNS["Frozen run artifacts"]
-    ROOT --> REVIEWS["Signed reviews"]
-    ROOT --> HANDOFFS["Handoff queue"]
-    RPC --> AGENT["by llm() AgentBriefing"]
-    AGENT --> FALLBACK["Deterministic Jac fallback"]
+    ROOT --> CACHE["Verified source cache"]
+    CACHE --> USGS["USGS earthquake records"]
+    CACHE --> NWS["NWS severe-weather records"]
+    UI --> MAP["Clearly labeled map artifacts"]
 ```
 
-All incident data sent to the agent comes from the typed graph snapshot. The
-agent is explicitly instructed to treat the data as a drill, avoid inventing
-facts, and return only the defined `AgentBriefing` schema.
+The former drill engine and its generated incident records are not part of the
+web runtime.
 
 ## Source Layout
 
 ```text
 main.jac                     Application entry point and client export
-saferelay/store.jac         Graph, endpoints, walker, agent, and domain logic
-saferelay/store_test.jac    Functional parity test suite
+saferelay/store.jac         Verified source cache and protected refresh endpoints
+saferelay/store_test.jac    Evidence-boundary tests
 saferelay/AppShell.jac      Client router
 saferelay/LoginPage.jac     Jac-native authentication
 saferelay/LandingPage.jac   Public experience
-saferelay/CommandCenter.jac Operations cockpit
+saferelay/VerifiedCommandCenter.jac Active evidence monitor
 styles/global.css            Responsive application styling
-jac.toml                     Jac runtime, client, model, and test configuration
+jac.toml                     Jac runtime, client, auth, and test configuration
 PRODUCTION.md                Production and JacHammer runbook
 PARITY.md                    Old-to-Jac functional parity contract
 ```
@@ -121,22 +101,8 @@ PARITY.md                    Old-to-Jac functional parity contract
 
 | Surface | Purpose |
 | --- | --- |
-| `get_snapshot` | Return the typed incident graph projection |
-| `reset_drill` | Re-seed one of the supported drill scenarios |
-| `configure_drill` | Generate a seeded four-scenario run from all controls |
-| `update_drill_runtime` | Persist speed, live mode, sound, and run/pause state |
-| `acknowledge_alert` | Persist operator acknowledgement |
-| `assign_responder` | Connect and assign an available responder |
-| `resolve_alert` | Persist alert resolution and release responders |
-| `cancel_alert` | Close an alert with a cancellation record |
-| `advance_drill` | Add the next deterministic exercise event |
-| Preset functions | Save, import, apply, export, and delete graph presets |
-| Archive functions | Freeze, compare, replay, and delete run artifacts |
-| Review functions | Score and sign after-action evidence |
-| Handoff functions | Create and update the receiving-operator lifecycle |
-| Disaster functions | Read cached feeds or refresh USGS and NWS |
-| `analyze_incident` | Return a structured, graph-grounded agent briefing |
-| `TraceRelay` | Walk the selected alert's verified relay path |
+| `get_disaster_feed` | Read only cached USGS/NWS source records |
+| `refresh_disaster_feed` | Refresh USGS/NWS without generated fallback records |
 
 All surfaces in this table require a valid Jac session and run against that
 operator's root graph. See [PRODUCTION.md](./PRODUCTION.md) for the production

@@ -9,10 +9,10 @@ It does not require or perform a Git push.
 - Entry point: `main.jac`.
 - Application type: full-stack Jac web app.
 - Public surface: landing page and built-in user authentication.
-- Protected surface: `/ops`, all incident functions, and `TraceRelay`.
-- Persistence: one isolated root graph per authenticated operator, including
-  presets, frozen runs, review records, handoffs, and disaster-feed cache.
-- Default agent mode: deterministic Jac policy with no provider dependency.
+- Protected surface: `/ops`, `get_disaster_feed`, and
+  `refresh_disaster_feed`.
+- Persistence: one isolated root graph per authenticated operator containing
+  only verified public-source hazard records.
 - Production topology: one application replica backed by Jac's persistent
   SQLite volume.
 
@@ -29,9 +29,6 @@ generator. Store them in JacHammer **Settings > Environment**, never in source:
 | --- | --- | --- |
 | `JWT_SECRET` | Yes | Signs operator sessions; startup fails when absent |
 | `PROMETHEUS_ADMIN_PASSWORD` | Yes | Protects the metrics/monitoring surface |
-| `SAFERELAY_LIVE_AGENT` | No | Set to `true` only after provider validation |
-| `BYLLM_DEFAULT_MODEL` | No | Defaults to `gpt-4o-mini` |
-| Provider API key | No | Required only when live-agent mode is enabled |
 | `MONGODB_URI` | Scale-out only | Shared graph and identity persistence |
 | `REDIS_URL` | Scale-out only | Shared cache and coordination |
 
@@ -98,15 +95,19 @@ production.
 
 ## JacHammer
 
-1. Create a full-stack project from the source folder in
+The monorepo publishes this folder to
+[`rishabhcli/SafeRelay-web`](https://github.com/rishabhcli/SafeRelay-web) after
+every push to `main` that changes `web/`. JacHammer must track that web-only
+repository, not the `rishabhcli/SafeRelay` monorepo.
+
+1. Import `https://github.com/rishabhcli/SafeRelay-web` in
    [JacHammer](https://jachammer.ai/).
 2. Open **Settings > Environment** and add the two required secrets.
-3. Keep `SAFERELAY_LIVE_AGENT=false` for the first release.
-4. Start Preview and complete the acceptance checks below.
-5. Use a sandbox deployment for the release candidate.
-6. Promote the same verified project state to a permanent production
+3. Start Preview and complete the acceptance checks below.
+4. Use a sandbox deployment for the release candidate.
+5. Promote the same verified project state to a permanent production
    deployment.
-7. Configure a custom domain only after the platform URL passes all checks.
+6. Configure a custom domain only after the platform URL passes all checks.
 
 Restart Preview after changing environment values so the Jac process receives
 the new configuration.
@@ -119,29 +120,23 @@ Verify against Preview, sandbox, and the final production URL:
 2. An unauthenticated visit to `/ops` redirects to `/login`.
 3. Account creation with a 12-character-or-longer password succeeds.
 4. A direct `/user/register` request rejects passwords shorter than 12
-   characters, while a compliant new account receives its own seeded wildfire
-   drill.
-5. Acknowledge, assign, resolve, reset, and advance persist after a reload.
-   Also verify cancel notes, scenario controls, presets, archives, replay,
-   comparisons, signed reviews, and handoff lifecycle changes.
-6. A second account cannot observe the first account's graph changes.
-7. Relay provenance returns the expected ordered path for `SOS-1042`.
-8. Agent analysis returns a structured deterministic briefing.
-9. `/docs`, `/redoc`, and `/openapi.json` return `404` or `403`, never `500`,
+   characters, while a compliant new account opens with no generated
+   operational records.
+5. Relay reports, receipts, acknowledgements, and outcomes remain empty or
+   unknown until their own evidence exists.
+6. A second account cannot observe the first account's cached source records.
+7. `/docs`, `/redoc`, and `/openapi.json` return `404` or `403`, never `500`,
    and do not expose an API schema.
-10. `/healthz/live` and `/healthz/ready` report healthy without authentication.
-11. `/metrics` rejects unauthenticated requests.
-12. Restarting the deployment preserves users and graph state.
-13. Live simulation appends one deterministic signal per tick at every speed,
-    and the mute control suppresses the local alert tone.
-14. USGS/NWS refresh either returns live source status or retains the fallback
-    continuity snapshot without failing the command surface.
-15. Complete the feature checklist in `PARITY.md` at desktop and mobile widths.
-
-When enabling a live model, set the provider key and
-`SAFERELAY_LIVE_AGENT=true`, restart, and repeat the agent check. The UI must
-still fall back to the deterministic Jac policy when the provider is
-unavailable.
+8. `/healthz/live` and `/healthz/ready` report healthy without authentication.
+9. `/metrics` rejects unauthenticated requests.
+10. Restarting the deployment preserves users and graph state.
+11. USGS/NWS refresh returns `live` or `partial` only for a successful source
+    request; total source failure retains verified cache or reports
+    `unavailable`.
+12. No source failure creates example, fallback, or continuity records.
+13. Synthetic artifacts appear only inside clearly labeled map layers.
+14. Complete the active-route checklist in `PARITY.md` at desktop and mobile
+    widths.
 
 ## Operations
 
@@ -150,8 +145,7 @@ unavailable.
 - Before schema renames, declare Jac schema aliases and inspect quarantine state
   with `jac db inspect --app main.jac`.
 - Rotate `JWT_SECRET` as a deliberate session-invalidating change.
-- Monitor request rate, error rate, walker latency, memory, and failed agent
-  provider calls.
+- Monitor request rate, error rate, source refresh latency, and memory.
 - Keep API docs disabled. Inspect the generated contract locally only when
   necessary; the Jac 0.34.7 `--faux` command currently prints the contract and
   then exits nonzero during server cleanup, so it is not a release gate.
