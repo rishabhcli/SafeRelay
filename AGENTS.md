@@ -22,11 +22,19 @@ jac check . && jac test && jac build main.jac  # Preflight
 
 # mobile/
 jac install && bun install
-jac start main.jac --client web --dev --port 4173 -a 4174  # Browser preview
 jac check . && jac test tests/protocol_tests.jac tests/operations_tests.jac -v
-jac build --client mobile --platform android  # Requires JDK 21 and Android SDK
 jac build --client mobile --platform ios      # Requires Xcode on macOS
 ```
+
+## Device Execution Policy
+
+Run and interactively test the mobile application only on physically connected
+Apple Intelligence-capable iPhones running iOS 27. Use Device Hub
+(`com.apple.dt.Devices`) to view and control each phone screen. Do not use an
+iPad, browser preview, iOS Simulator, Android emulator, or Android device, and
+do not build or test Android. If fewer than two qualifying physical iPhones are
+connected, report Bluetooth relay validation as blocked instead of substituting
+another runtime.
 
 ## Coding Style & Naming Conventions
 
@@ -41,9 +49,11 @@ mobile modules within their existing domain, service, or component boundary.
 
 Add or update Jac tests beside the affected application. Name test files
 `*_test.jac` or `*_tests.jac`, and give tests behavior-focused names. Run
-`jac check .` before tests. Browser previews and builds do not prove BLE relay
-behavior; validate scanning, advertising, background continuity, and delivery
-on two physical devices before claiming native radio support.
+`jac check .` before tests. Host-side checks and unit tests do not prove device
+behavior. Validate UI behavior and Apple Intelligence integration through
+Device Hub on qualifying physical iPhones. Validate scanning, advertising,
+background continuity, and delivery on at least two qualifying physical
+iPhones before claiming native radio support.
 
 ## Commit & Pull Request Guidelines
 
