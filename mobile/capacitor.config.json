@@ -1,0 +1,16 @@
+{
+  "appId": "com.development.saferelay",
+  "appName": "SafeRelay",
+  "webDir": ".jac/client/dist",
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "capacitor"
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "disable",
+      "style": "DARK",
+      "hidden": false
+    }
+  }
+}

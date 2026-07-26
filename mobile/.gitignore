@@ -1,0 +1,23 @@
+.DS_Store
+.jac/
+node_modules/
+dist/
+artifacts/
+.pytest_cache/
+*.log
+
+# Capacitor native build products and local signing state
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+ios/App/DerivedData/
+ios/App/build/
+ios/App/Pods/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+
+# Local editor state
+.idea/
+.vscode/
