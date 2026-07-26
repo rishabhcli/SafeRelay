@@ -40,8 +40,9 @@ implementation to change where Jac replaces a former framework or service.
 - Supabase synchronization is replaced by the authenticated Jac root graph.
   The user-visible durability, diagnostics, isolation, archives, and handoff
   behavior remain; there is no split local/remote source of truth.
-- Mapbox is replaced by a token-free Jac incident map. Alert selection, map
-  positions, severity, gateway context, and relay inspection remain available.
+- The incident map uses Mapbox GL with a public token supplied through
+  `MAPBOX_ACCESS_TOKEN`. Alert selection, geographic positions, severity,
+  gateway context, and relay inspection remain available.
 - Framer Motion and matrix-rain decoration are not runtime dependencies.
   Functional transitions, live status, and scenario interactions remain in Jac
   and CSS.

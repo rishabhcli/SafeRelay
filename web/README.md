@@ -45,6 +45,7 @@ Install [Jac](https://www.jac-lang.org/install/) and then:
 ```bash
 export JWT_SECRET="$(openssl rand -hex 32)"
 export PROMETHEUS_ADMIN_PASSWORD="$(openssl rand -base64 32)"
+export MAPBOX_ACCESS_TOKEN="<public Mapbox token>"
 jac install
 jac start --dev main.jac
 ```
@@ -54,9 +55,10 @@ Open:
 - Landing experience: [http://localhost:8000](http://localhost:8000)
 - Operations drill: [http://localhost:8000/ops](http://localhost:8000/ops)
 
-No database, JavaScript build command, Mapbox account, or Supabase project is
-required for a single-replica deployment. To use a live model, configure a
-provider supported by Jac's byLLM runtime, set `BYLLM_DEFAULT_MODEL`, and set
+No database, JavaScript build command, or Supabase project is required for a
+single-replica deployment. The incident map uses a public Mapbox access token
+from `MAPBOX_ACCESS_TOKEN`. To use a live model, configure a provider supported
+by Jac's byLLM runtime, set `BYLLM_DEFAULT_MODEL`, and set
 `SAFERELAY_LIVE_AGENT=true`. Without that explicit gate, the typed deterministic
 briefing is used.
 

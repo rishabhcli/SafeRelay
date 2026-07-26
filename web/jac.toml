@@ -13,6 +13,7 @@ requests = ">=2.32,<3"
 
 [dependencies.npm]
 "lucide-react" = "^0.562.0"
+"mapbox-gl" = "^3.27.0"
 react = "^18.2.0"
 react-dom = "^18.2.0"
 react-router-dom = "^6.22.0"
@@ -45,6 +46,9 @@ description = "Graph-native emergency mesh operations and agentic drill command 
 keywords = "emergency mesh, incident command, Jac, graph operations, disaster drill"
 author = "SafeRelay Team"
 theme_color = "#0a0d0f"
+
+[client.vite.define]
+"__MAPBOX_ACCESS_TOKEN__" = "${MAPBOX_ACCESS_TOKEN:-pk.eyJ1IjoicmlzaGFiaGNsaSIsImEiOiJjbW1wa2xyeHAwZXVsMm9xNmViNXM3cDBnIn0.ecutlr2fPR_icmDlGeTi7g}"
 
 [byllm.model]
 default_model = "${BYLLM_DEFAULT_MODEL:-gpt-4o-mini}"

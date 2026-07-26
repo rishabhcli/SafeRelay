@@ -2,6 +2,11 @@
 
 import from "@jac/runtime" { Link, jacLogout, useNavigate }
 import from "react" { useEffect, useRef }
+import from "mapbox-gl" {
+    Map as MapboxMap,
+    Marker as MapboxMarker,
+    NavigationControl,
+}
 import from "lucide-react" {
     Activity,
     Archive,
@@ -28,7 +33,7 @@ import from "lucide-react" {
     List,
     LocateFixed,
     LogOut,
-    Map,
+    Map as MapIcon,
     Network,
     Pause,
     Play,
@@ -99,6 +104,9 @@ sv import from .store {
     update_drill_runtime,
 }
 
+glob MAPBOX_ACCESS_TOKEN: str = str(__MAPBOX_ACCESS_TOKEN__);  # jac:ignore[W2001]
+glob _document: any = document;  # jac:ignore[W1037, W2001]
+
 
 def priority_class(priority: str) -> str {
     return f"priority priority--{priority}";
@@ -124,8 +132,192 @@ def:pub StatTile(
 }
 
 
+def map_center_longitude(scenario: str) -> float {
+    if scenario == "tornado" { return -97.5164; }
+    if scenario == "hurricane" { return -94.7977; }
+    if scenario == "earthquake" { return -118.2437; }
+    return -121.6219;
+}
+
+
+def map_center_latitude(scenario: str) -> float {
+    if scenario == "tornado" { return 35.4676; }
+    if scenario == "hurricane" { return 29.3013; }
+    if scenario == "earthquake" { return 34.0522; }
+    return 39.7285;
+}
+
+
+def map_longitude(map_x: int, scenario: str) -> float {
+    span: float = 0.62 if scenario == "earthquake" else 0.42;
+    return map_center_longitude(scenario) - (span / 2.0) + (
+        float(map_x) / 100.0 * span
+    );
+}
+
+
+def map_latitude(map_y: int, scenario: str) -> float {
+    span: float = 0.34 if scenario == "earthquake" else 0.28;
+    return map_center_latitude(scenario) + (span / 2.0) - (
+        float(map_y) / 100.0 * span
+    );
+}
+
+
+def add_gateway_marker(
+    map_instance: any,
+    label: str,
+    longitude: float,
+    latitude: float,
+) -> any {
+    element: any = _document.createElement("div");
+    element.className = "gateway mapbox-gateway";
+    element.setAttribute("aria-label", label + " mesh gateway");
+    element.textContent = label;
+    marker: any = new(
+        MapboxMarker,
+        {"element": element, "anchor": "center"},
+    );
+    marker.setLngLat([longitude, latitude]);
+    marker.addTo(map_instance);
+    return marker;
+}
+
+
+def:pub MapboxIncidentMap(
+    alerts: list[AlertView],
+    scenario: str,
+    selected_id: str,
+    on_select: Callable[[str], None],
+) -> JsxElement {
+    has map_container_ref: Ref[HTMLDivElement] = Ref();
+    has map_ref: Ref[any] = Ref(None);
+    has marker_refs: Ref[list[any]] = Ref([]);
+
+    useEffect(
+        lambda {
+            if not map_container_ref.current or not MAPBOX_ACCESS_TOKEN {
+                return;
+            }
+            map_instance: any = new(
+                MapboxMap,
+                {
+                    "accessToken": MAPBOX_ACCESS_TOKEN,
+                    "container": map_container_ref.current,
+                    "style": "mapbox://styles/mapbox/dark-v11",
+                    "center": [
+                        map_center_longitude(scenario),
+                        map_center_latitude(scenario),
+                    ],
+                    "zoom": 9.6,
+                    "minZoom": 8.0,
+                    "maxZoom": 15.0,
+                    "cooperativeGestures": True,
+                },
+            );
+            map_instance.addControl(
+                new(NavigationControl, {"showCompass": False}),
+                "top-right",
+            );
+            map_ref.current = map_instance;
+            return lambda {
+                map_instance.remove();
+                map_ref.current = None;
+            };
+        },
+        [],
+    );
+
+    useEffect(
+        lambda {
+            map_instance: any = map_ref.current;
+            if not map_instance {
+                return;
+            }
+            map_instance.jumpTo({
+                "center": [
+                    map_center_longitude(scenario),
+                    map_center_latitude(scenario),
+                ],
+                "zoom": 9.6,
+            });
+            for old_marker in marker_refs.current {
+                old_marker.remove();
+            }
+            next_markers: list[any] = [];
+            for alert in alerts {
+                marker_element: any = _document.createElement("button");
+                marker_element.type = "button";
+                marker_element.className = (
+                    f"alert-pin alert-pin--{alert.priority} is-selected"
+                    if alert.alert_id == selected_id
+                    else f"alert-pin alert-pin--{alert.priority}"
+                );
+                marker_element.setAttribute(
+                    "aria-label",
+                    f"Select {alert.alert_id}, {alert.priority} {alert.emergency_type}",
+                );
+                marker_dot: any = _document.createElement("span");
+                marker_label: any = _document.createElement("small");
+                marker_label.textContent = alert.alert_id;
+                marker_element.appendChild(marker_dot);
+                marker_element.appendChild(marker_label);
+                marker_element.addEventListener(
+                    "click",
+                    lambda (_event: any) { on_select(alert.alert_id); },
+                );
+                marker: any = new(
+                    MapboxMarker,
+                    {"element": marker_element, "anchor": "center"},
+                );
+                marker.setLngLat([
+                    map_longitude(alert.map_x, scenario),
+                    map_latitude(alert.map_y, scenario),
+                ]);
+                marker.addTo(map_instance);
+                next_markers.append(marker);
+            }
+            next_markers.append(
+                add_gateway_marker(
+                    map_instance,
+                    "GW-A",
+                    map_longitude(38, scenario),
+                    map_latitude(20, scenario),
+                )
+            );
+            next_markers.append(
+                add_gateway_marker(
+                    map_instance,
+                    "GW-B",
+                    map_longitude(72, scenario),
+                    map_latitude(76, scenario),
+                )
+            );
+            marker_refs.current = next_markers;
+            return lambda {
+                for marker in next_markers {
+                    marker.remove();
+                }
+            };
+        },
+        [alerts, scenario, selected_id],
+    );
+
+    return <div className="ops-map">
+        <div ref={map_container_ref} className="ops-map__canvas"></div>
+        {if not MAPBOX_ACCESS_TOKEN {
+            <div className="map-config-error">
+                <MapIcon size={18} />
+                <span>Map unavailable</span>
+            </div>
+        }}
+    </div>;
+}
+
+
 def:pub AlertMapPanel(
     alerts: list[AlertView],
+    scenario: str,
     selected_id: str,
     on_select: Callable[[str], None],
 ) -> JsxElement {
@@ -137,35 +329,7 @@ def:pub AlertMapPanel(
                 <span><span className="legend-dot legend-dot--mesh"></span> Mesh node</span>
             </div>
         </header>
-        <div className="ops-map">
-            <div className="ops-map__grid"></div>
-            <div className="ops-map__road ops-map__road--one"></div>
-            <div className="ops-map__road ops-map__road--two"></div>
-            <div className="ops-map__water"></div>
-            <span className="ops-map__label ops-map__label--north">NORTH RIDGE</span>
-            <span className="ops-map__label ops-map__label--east">EAST RIDGE</span>
-            <span className="ops-map__label ops-map__label--canyon">CANYON</span>
-            <span className="ops-map__label ops-map__label--lake">LAKE</span>
-            {for alert in alerts {
-                <button
-                    key={alert.alert_id}
-                    className={
-                        f"alert-pin alert-pin--{alert.priority} is-selected"
-                        if alert.alert_id == selected_id
-                        else f"alert-pin alert-pin--{alert.priority}"
-                    }
-                    style={{"left": f"{alert.map_x}%", "top": f"{alert.map_y}%"}}
-                    onClick={lambda (_e: MouseEvent) { on_select(alert.alert_id); }}
-                    aria-label={f"Select {alert.alert_id}, {alert.priority} {alert.emergency_type}"}
-                >
-                    <span></span>
-                    <small>{alert.alert_id}</small>
-                </button>
-            }}
-            <div className="gateway gateway--alpha"><Wifi size={15} /><span>GW-A</span></div>
-            <div className="gateway gateway--bravo"><Wifi size={15} /><span>GW-B</span></div>
-            <div className="map-scale"><span></span> 1 KM</div>
-        </div>
+        <MapboxIncidentMap alerts={alerts} scenario={scenario} selected_id={selected_id} on_select={on_select} />
     </section>;
 }
 
@@ -951,7 +1115,7 @@ def:pub CommandCenter -> JsxElement {
             <nav className="ops-nav">
                 <button className={"is-active" if active_view == "dashboard" else ""} onClick={lambda (_e: MouseEvent) { active_view = "dashboard"; }}><LayoutDashboard size={17} /><span>Dashboard</span></button>
                 <button className={"is-active" if active_view == "signals" else ""} onClick={lambda (_e: MouseEvent) { active_view = "signals"; }}><Table2 size={17} /><span>SOS signals</span></button>
-                <button className={"is-active" if active_view == "map" else ""} onClick={lambda (_e: MouseEvent) { active_view = "map"; }}><Map size={17} /><span>Live map</span></button>
+                <button className={"is-active" if active_view == "map" else ""} onClick={lambda (_e: MouseEvent) { active_view = "map"; }}><MapIcon size={17} /><span>Live map</span></button>
                 <button className={"is-active" if active_view == "scenario" else ""} onClick={lambda (_e: MouseEvent) { active_view = "scenario"; }}><SlidersHorizontal size={17} /><span>Scenario lab</span></button>
                 <button className={"is-active" if active_view == "archive" else ""} onClick={lambda (_e: MouseEvent) { active_view = "archive"; }}><Archive size={17} /><span>Archive & replay</span></button>
                 <button className={"is-active" if active_view == "reviews" else ""} onClick={lambda (_e: MouseEvent) { active_view = "reviews"; }}><ClipboardCheck size={17} /><span>AAR & handoffs</span></button>
@@ -1048,11 +1212,11 @@ def:pub CommandCenter -> JsxElement {
 
             {if active_view == "dashboard" {
                 <div className="primary-grid" id="incident-map">
-                    <AlertMapPanel alerts={current.alerts} selected_id={selected_alert_id} on_select={select_alert} />
+                    <AlertMapPanel alerts={current.alerts} scenario={current.scenario} selected_id={selected_alert_id} on_select={select_alert} />
                     <AlertQueue alerts={current.alerts[:12]} selected_id={selected_alert_id} on_select={select_alert} />
                 </div>;
             } elif active_view == "map" {
-                <div className="map-only-view"><AlertMapPanel alerts={filtered_alerts} selected_id={selected_alert_id} on_select={select_alert} /></div>;
+                <div className="map-only-view"><AlertMapPanel alerts={filtered_alerts} scenario={current.scenario} selected_id={selected_alert_id} on_select={select_alert} /></div>;
             } elif active_view == "signals" {
                 <div className="parity-view">
                     <div className="table-toolbar">
