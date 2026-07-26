@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">SafeRelay</string>
+    <string name="title_activity_main">SafeRelay</string>
+    <string name="package_name">com.development.saferelay</string>
+    <string name="custom_url_scheme">com.development.saferelay</string>
+</resources>
