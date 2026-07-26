@@ -28,6 +28,35 @@ obj:pub OperationalReport {
 }
 
 
+obj:pub SurvivalChatMessage {
+    has role: str,
+        content: str,
+        timestamp: int;
+}
+
+
+def:pub survival_chat_records(
+    records: list[dict[str, object]],
+    limit: int = 24
+) -> list[SurvivalChatMessage] {
+    messages: list[SurvivalChatMessage] = [];
+    for record in records {
+        role = str(record.get("role", ""));
+        content = str(record.get("content", "")).strip();
+        timestamp = record.get("timestamp", 0);
+        if role not in ["user", "assistant"] or not content or not isinstance(timestamp, int) {
+            continue;
+        }
+        messages.append(SurvivalChatMessage(
+            role=role,
+            content=content[:1200],
+            timestamp=timestamp
+        ));
+    }
+    return messages[-max(1, min(limit, 24)):];
+}
+
+
 obj:pub NavigationVector {
     has distance_meters: float,
         bearing_degrees: float,

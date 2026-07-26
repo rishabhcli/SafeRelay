@@ -13,7 +13,9 @@
 | `services/mesh.cl.jac` | Capacitor BLE, device, location, alert, and torch bindings |
 | `services/storage.cl.jac` | Capacitor Preferences persistence |
 | `services/field.cl.jac` | Disaster feeds, reachability, maps, cloud sync, and ultrasonic I/O |
+| `components/IncidentMap.cl.jac` | Mapbox GL map, signal markers, selection, zoom, pan, and recenter behavior |
 | `services/handoff.cl.jac` | Copy, file, share, print, QR payload, and SHA-256 transfer support |
+| `services/foundation_models.cl.jac` | iOS-only local Apple Foundation Models survival-chat bridge |
 | `tests/*.jac` | Codec, compatibility, policy, utility, and operational tests |
 | `android/`, `ios/` | Generated Capacitor shells plus required native configuration |
 
@@ -46,3 +48,21 @@ The mobile product is Jac application code in a real Capacitor shell. Native
 Java and generated Swift project metadata exist only where the operating
 systems require a service, entitlement, permission, resource, or plugin bridge.
 The app identifier remains `com.development.saferelay`.
+
+`SafeRelayFoundationModelsPlugin.swift` is an iOS 26 Capacitor bridge to
+`SystemLanguageModel.default`. It receives at most 12 recent local chat messages
+and a bounded evidence snapshot, then creates one advisory Survival Guide reply
+with a fresh native session. Conversation history is retained only in Capacitor
+Preferences, is never included in radio packets, cloud sync, responder handoffs,
+or QR artifacts, and can be cleared in Field Tools. The Guide is hidden in the
+browser, on Android, and when Apple Intelligence is unavailable; relay packet
+codec, policy, and delivery claims remain deterministic Jac.
+`SafeRelayBridgeViewController` registers the app-local plugin after Capacitor
+creates its bridge, so normal Capacitor sync operations do not need to alter the
+generated plugin list. On iOS it also installs the primary navigation as a
+native `UITabBar`. UIKit owns its Liquid Glass appearance, safe-area behavior,
+light and dark appearance, SF Symbols, selection state, and accessibility. The
+center SOS tab remains red and invokes the corresponding stable Jac navigation
+element. The web header is hidden on iOS so content begins at the top safe area
+without an additional toolbar; the original HTML navigation and header remain
+the fallback when native chrome is absent.

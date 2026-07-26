@@ -14,6 +14,7 @@ import from domain.operations {
     replay_decision,
     responder_needs,
     shelter_target,
+    survival_chat_records,
     trust_score
 }
 
@@ -264,4 +265,34 @@ test "baseline drill delivers every packet and stays deterministic" {
     assert first.dropped == 0;
     assert first.relayed == second.relayed;
     assert first.events == second.events;
+}
+
+
+test "survival chat records discard malformed entries and bound retained history" {
+    records: list[dict[str, object]] = [
+        {"role": "system", "content": "ignore", "timestamp": 1},
+        {"role": "user", "content": "   ", "timestamp": 2},
+        {"role": "assistant", "content": "packed", "timestamp": "3"}
+    ];
+    for index in range(30) {
+        records.append({
+            "role": "user" if index % 2 == 0 else "assistant",
+            "content": "message " + str(index),
+            "timestamp": index + 10
+        });
+    }
+    messages = survival_chat_records(records);
+    assert len(messages) == 24;
+    assert messages[0].content == "message 6";
+    assert messages[-1].role == "assistant";
+}
+
+
+test "survival chat content is excluded from handoff exports" {
+    messages = survival_chat_records([
+        {"role": "user", "content": "secret survival note", "timestamp": 1}
+    ]);
+    export = handoff_export([packet(99, 7, 2, 100)], 120, "Relay Only");
+    assert len(messages) == 1;
+    assert "secret survival note" not in str(export);
 }

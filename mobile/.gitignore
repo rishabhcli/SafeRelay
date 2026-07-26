@@ -5,6 +5,8 @@ dist/
 artifacts/
 .pytest_cache/
 *.log
+.env*
+!.env.example
 
 # Capacitor native build products and local signing state
 android/.gradle/

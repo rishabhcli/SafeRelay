@@ -3,6 +3,10 @@
 import from "@capacitor/preferences" { Preferences }
 import from "@capacitor/device" { Device }
 import from ..domain.protocol { ClientSosPacket as SosPacket }
+import from ..domain.operations {
+    ClientSurvivalChatMessage,
+    client_survival_chat_records
+}
 
 glob _preferences: any = Preferences;  # jac:ignore[W1037]
 glob PACKETS_KEY: str = "saferelay.packets.v2";
@@ -16,6 +20,7 @@ glob:pub SYNC_RECEIPTS_KEY: str = "saferelay.sync-receipts.v1";
 glob:pub ADJUDICATIONS_KEY: str = "saferelay.adjudications.v1";
 glob:pub DISASTER_CACHE_KEY: str = "saferelay.disasters.v1";
 glob:pub REGION_CACHE_KEY: str = "saferelay.offline-regions.v1";
+glob:pub SURVIVAL_CHAT_KEY: str = "saferelay.survival-chat.v1";
 
 
 async def:pub load_setting(key: str, fallback: str) -> str {
@@ -60,6 +65,30 @@ async def:pub append_record(
 ) {
     records = await load_records(key);
     await save_records(key, [record] + records[:limit - 1]);
+}
+
+
+async def:pub load_survival_chat_history -> list[ClientSurvivalChatMessage] {
+    records = await load_records(SURVIVAL_CHAT_KEY);
+    return client_survival_chat_records(records);
+}
+
+
+async def:pub save_survival_chat_history(messages: list[ClientSurvivalChatMessage]) {
+    records: list[dict[str, object]] = [
+        {
+            "role": message.role,
+            "content": message.content[:1200],
+            "timestamp": message.timestamp
+        }
+        for message in messages[-24:]
+    ];
+    await save_records(SURVIVAL_CHAT_KEY, records);
+}
+
+
+async def:pub clear_survival_chat_history {
+    await _preferences["remove"]({"key": SURVIVAL_CHAT_KEY});
 }
 
 

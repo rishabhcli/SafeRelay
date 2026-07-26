@@ -18,6 +18,35 @@ obj:pub ClientOperationalReport {
 }
 
 
+obj:pub ClientSurvivalChatMessage {
+    has role: str,
+        content: str,
+        timestamp: int;
+}
+
+
+def:pub client_survival_chat_records(
+    records: list[dict[str, object]],
+    limit: int = 24
+) -> list[ClientSurvivalChatMessage] {
+    messages: list[ClientSurvivalChatMessage] = [];
+    for record in records {
+        role = str(record.get("role", ""));
+        content = str(record.get("content", "")).strip();
+        timestamp = record.get("timestamp", 0);
+        if role not in ["user", "assistant"] or not content or not isinstance(timestamp, int) {
+            continue;
+        }
+        messages.append(ClientSurvivalChatMessage(
+            role=role,
+            content=content[:1200],
+            timestamp=timestamp
+        ));
+    }
+    return messages[-max(1, min(limit, 24)):];
+}
+
+
 obj:pub ClientNavigationVector {
     has distance_meters: float,
         bearing_degrees: float,

@@ -22,6 +22,7 @@ is not treated as physical end-to-end proof.
 | Torch strobe and Morse translation | Torch plugin and Jac Morse utility | Built; hardware proof pending |
 | 17-20 kHz FSK transmitter and FFT detector | Web Audio transmitter and microphone spectrum receiver | Built; acoustic proof pending |
 | Local and global disaster sources | USGS, NOAA, and GDACS aggregation with 24-hour cache | Built; USGS/NOAA live browser fetch verified; GDACS uses native HTTP |
+| Explorable local incident map | Full-screen Mapbox GL with drag, pinch zoom, clearly labeled demo signals, current position, and recenter | Built; physical-device render verified |
 | Three failed reachability probes activate offline relay | Reachability monitor and automatic mesh policy | Built |
 | Offline OpenStreetMap tiles | Cache Storage-backed local tile region | Built; bounded 25-tile region |
 | Cloud bridge, duplicate receipts, and sync attempt ledger | Supabase RPC bridge and durable evidence ledgers | Built; privacy-blocked path verified |

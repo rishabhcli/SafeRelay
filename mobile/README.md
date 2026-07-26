@@ -17,7 +17,8 @@ Bluetooth success.
 - App-owned Android `connectedDevice` foreground service
 - iOS `bluetooth-central` and `bluetooth-peripheral` background modes
 - Capacitor Preferences, Filesystem, Share, and native Printer plugins
-- USGS, NOAA, GDACS, OpenStreetMap, and the privacy-gated Supabase bridge
+- Mapbox GL for the explorable live incident map
+- USGS, NOAA, GDACS, OpenStreetMap offline tiles, and the privacy-gated Supabase bridge
 
 The generated `android/` and `ios/` directories contain only the native bridge
 code required by Capacitor. There is no Flutter or Dart source, package
@@ -30,7 +31,10 @@ Install Jac and project dependencies:
 ```sh
 jac install
 bun install
+cp -n .env.example .env
 ```
+
+Set `MAPBOX_ACCESS_TOKEN` in `.env` before building the client.
 
 Start the live browser preview:
 

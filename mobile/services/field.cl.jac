@@ -505,7 +505,10 @@ async def:pub sync_relayed_packets(
 
 def _encode_ultrasonic_bits(message: str) -> list[int] {
     bits: list[int] = [];
-    values: list[int] = [170, 170] + [ord(character) & 255 for character in message];
+    values: list[int] = [170, 170];
+    for index in range(len(message)) {
+        values.append(ord(message[index]) & 255);
+    }
     for value in values {
         bits.append(0);
         for offset in range(8) { bits.append((value >> offset) & 1); }
@@ -524,6 +527,9 @@ async def:pub transmit_ultrasonic(
         return {"sent": False, "message": "Web Audio is unavailable."};
     }
     context: any = new(context_constructor);  # jac:ignore[W1037, W2001]
+    if str(context.state) == "suspended" {
+        await context.resume();
+    }
     oscillator: any = context.createOscillator();  # jac:ignore[W1037]
     gain: any = context.createGain();  # jac:ignore[W1037]
     oscillator.connect(gain);
@@ -531,6 +537,7 @@ async def:pub transmit_ultrasonic(
     bits = _encode_ultrasonic_bits(message);
     start: float = float(context.currentTime) + 0.05;
     seconds_per_bit = 0.05;
+    gain.gain.setValueAtTime(0.0, float(context.currentTime));
     gain.gain.setValueAtTime(0.18, start);
     for (index, bit) in enumerate(bits) {
         oscillator.frequency.setValueAtTime(
@@ -541,6 +548,7 @@ async def:pub transmit_ultrasonic(
     end = start + float(len(bits)) * seconds_per_bit;
     gain.gain.setValueAtTime(0.18, end - 0.01);
     gain.gain.linearRampToValueAtTime(0.0, end);
+    oscillator.addEventListener("ended", lambda { context.close(); }, {"once": True});
     oscillator.start(start);
     oscillator.stop(end);
     return {

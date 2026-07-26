@@ -16,12 +16,13 @@ import from "lucide-react" {
     Copy,
     Database,
     Download,
-    ExternalLink,
     Flashlight,
     Gauge,
     HeartPulse,
     Headphones,
-    Languages,
+    MessageCircle,
+    Send,
+    Sparkles,
     ListChecks,
     LocateFixed,
     LockKeyhole,
@@ -33,7 +34,6 @@ import from "lucide-react" {
     QrCode,
     Radio,
     RefreshCw,
-    Route,
     ShieldCheck,
     Share2,
     Siren,
@@ -52,7 +52,6 @@ import from ..domain.protocol {
     ClientSosPacket as SosPacket,
     client_contains_packet as contains_packet,
     client_create_packet as create_packet,
-    client_estimated_distance_meters as estimated_distance_meters,
     client_evaluate_relay as evaluate_relay,
     client_packet_from_bytes as packet_from_bytes,
     client_packet_to_bytes as packet_to_bytes,
@@ -60,8 +59,7 @@ import from ..domain.protocol {
     client_replace_packet as replace_packet,
     client_status_color as status_color,
     client_status_description as status_description,
-    client_status_label as status_label,
-    client_to_morse as to_morse
+    client_status_label as status_label
 }
 import from ..domain.operations {
     ClientDrillReport,
@@ -79,12 +77,17 @@ import from ..domain.operations {
 import from ..services.field {
     cache_map_region,
     fetch_disaster_events,
-    map_tile_urls,
     start_ultrasonic_listener,
     stop_ultrasonic_listener,
     sync_relayed_packets,
     transmit_ultrasonic,
     verify_internet
+}
+import from ..services.foundation_models {
+    FoundationModelChatResponse,
+    FoundationModelStatus,
+    chat_with_survival_guide,
+    foundation_model_status,
 }
 import from ..services.handoff {
     copy_handoff,
@@ -102,7 +105,6 @@ import from ..services.mesh {
     mesh_is_running,
     native_platform,
     notify_incoming,
-    open_native_settings,
     publish_packet,
     register_app_state_observer,
     resume_saved_mesh,
@@ -121,24 +123,25 @@ import from ..services.storage {
     append_record,
     clear_packets,
     clear_operational_history,
+    clear_survival_chat_history,
     complete_onboarding,
     get_or_create_user_id,
     load_records,
+    load_survival_chat_history,
     load_onboarding_complete,
     load_packets,
     load_setting,
     next_sequence,
     save_packets,
+    save_survival_chat_history,
     save_setting
 }
-
-
-def:pub StatusPill(label: str, value: str, tone: str = "neutral") -> JsxElement {
-    return <div className={"status-pill " + tone}>
-        <span>{label}</span>
-        <strong>{value}</strong>
-    </div>;
+import from ..domain.operations {
+    ClientSurvivalChatMessage
 }
+import from .IncidentMap { IncidentMap }
+
+glob _window: any = window;  # jac:ignore[W1037, W2001]
 
 
 def:pub Metric(label: str, value: str, detail: str) -> JsxElement {
@@ -189,37 +192,11 @@ def:pub PacketRow(packet: SosPacket, now: int) -> JsxElement {
 }
 
 
-def _strongest_packet(packets: list[SosPacket]) -> SosPacket | None {
-    strongest: SosPacket | None = None;
-    for packet in packets {
-        if strongest is None {
-            strongest = packet;
-        } elif packet.rssi > (strongest as SosPacket).rssi {
-            strongest = packet;
-        }
-    }
-    return strongest;
-}
-
-
-def _plot_x(packet: SosPacket) -> float {
-    return float(abs(packet.longitude_e7 % 8200)) / 82.0;
-}
-
-
-def _plot_y(packet: SosPacket) -> float {
-    return float(abs(packet.latitude_e7 % 7600)) / 76.0;
-}
-
-
 def:pub AppShell -> JsxElement {
     has booting: bool = True;
     has onboarding_done: bool = False;
     has active_tab: str = "command";
-    has command_view: str = "overview";
-    has map_view: str = "local";
-    has tools_view: str = "locator";
-    has sos_view: str = "broadcast";
+    has tools_view: str = "guide";
     has systems_view: str = "radio";
     has user_id: int = 0;
     has packets: list[SosPacket] = [];
@@ -260,9 +237,17 @@ def:pub AppShell -> JsxElement {
     has ultrasonic_energy: float = 0.0;
     has ultrasonic_base: float = 17000.0;
     has ultrasonic_log: list[str] = [];
+    has foundation_status: FoundationModelStatus = FoundationModelStatus(
+        available=False,
+        availability="not checked",
+        mode="unavailable"
+    );
+    has survival_chat: list[ClientSurvivalChatMessage] = [];
+    has survival_input: str = "";
+    has survival_sending: bool = False;
     has strobe_active: bool = False;
-    has morse_input: str = "SOS";
     has heading: float = 0.0;
+    has compass_status: str = "Tap enable to start the live heading.";
     has strobe_timer: Ref[any] = Ref(None);  # jac:ignore[W1037]
     has strobe_phase: Ref[bool] = Ref(False);
 
@@ -276,6 +261,77 @@ def:pub AppShell -> JsxElement {
         if readiness.native {
             mesh_message = readiness.message;
         }
+    }
+
+    async def refresh_foundation_status {
+        foundation_status = await foundation_model_status();
+    }
+
+    async def send_survival_message(field_context: list[str]) {
+        message = survival_input.strip();
+        if not message or survival_sending { return; }
+        user_message = ClientSurvivalChatMessage(
+            role="user",
+            content=message[:1200],
+            timestamp=unix_seconds()
+        );
+        next_history = (survival_chat + [user_message])[-24:];
+        survival_chat = next_history;
+        survival_input = "";
+        survival_sending = True;
+        result: FoundationModelChatResponse = await chat_with_survival_guide(
+            [
+                {
+                    "role": item.role,
+                    "content": item.content,
+                    "timestamp": item.timestamp
+                }
+                for item in next_history[-12:]
+            ],
+            field_context
+        );
+        foundation_status = FoundationModelStatus(
+            available=result.available,
+            availability=result.availability,
+            mode="on-device" if result.available else "unavailable"
+        );
+        if result.reply {
+            survival_chat = (next_history + [ClientSurvivalChatMessage(
+                role="assistant",
+                content=result.reply,
+                timestamp=unix_seconds()
+            )])[-24:];
+            await save_survival_chat_history(survival_chat);
+            append_log("Generated a local survival-guide reply.");
+        } else {
+            survival_chat = survival_chat[:-1];
+            alert_message = "Survival Guide unavailable: " + result.availability;
+            alert_tone = "warning";
+        }
+        survival_sending = False;
+    }
+
+    async def copy_survival_message(content: str) {
+        try {
+            clipboard: any = _window.navigator.clipboard;  # jac:ignore[W1037]
+            if not clipboard {
+                raise RuntimeError("Clipboard unavailable");
+            }
+            await clipboard.writeText(content);
+            alert_message = "Guide reply copied.";
+            alert_tone = "neutral";
+        } except Exception {
+            alert_message = "Could not copy the guide reply.";
+            alert_tone = "warning";
+        }
+    }
+
+    async def erase_survival_chat {
+        await clear_survival_chat_history();
+        survival_chat = [];
+        survival_input = "";
+        alert_message = "Local Survival Guide history cleared.";
+        alert_tone = "neutral";
     }
 
     def append_log(message: str) {
@@ -413,12 +469,6 @@ def:pub AppShell -> JsxElement {
         );
         append_log(alert_message);
         await emergency_haptic();
-    }
-
-    async def mark_safe {
-        selected_status = 0;
-        distress_armed = True;
-        await send_selected_status();
     }
 
     async def choose_privacy(mode: str) {
@@ -607,18 +657,25 @@ def:pub AppShell -> JsxElement {
     }
 
     async def send_ultrasonic {
-        result: any = await transmit_ultrasonic(  # jac:ignore[W1037]
-            "SOS:" + str(user_id)[-3:],
-            ultrasonic_base
-        );
-        ultrasonic_log = [
-            ("TX " + str(result["message"])) if bool(result["sent"]) else str(result["message"])
-        ] + ultrasonic_log[:5];
-        alert_message = (
-            "Ultrasonic packet transmitted."
-            if bool(result["sent"]) else str(result["message"])
-        );
-        alert_tone = "success" if bool(result["sent"]) else "warning";
+        try {
+            result: any = await transmit_ultrasonic(  # jac:ignore[W1037]
+                "SOS:" + str(user_id)[-3:],
+                ultrasonic_base
+            );
+            ultrasonic_log = [
+                ("TX " + str(result["message"])) if bool(result["sent"]) else str(result["message"])
+            ] + ultrasonic_log[:5];
+            alert_message = (
+                "Ultrasonic packet transmitted."
+                if bool(result["sent"]) else str(result["message"])
+            );
+            alert_tone = "success" if bool(result["sent"]) else "warning";
+        } except Exception as error {
+            message = "Ultrasonic transmitter unavailable: " + str(error);
+            ultrasonic_log = [message] + ultrasonic_log[:5];
+            alert_message = message;
+            alert_tone = "warning";
+        }
     }
 
     async def toggle_ultrasonic_listener {
@@ -641,6 +698,29 @@ def:pub AppShell -> JsxElement {
         alert_tone = "success" if ultrasonic_listening else "warning";
     }
 
+    async def enable_compass {
+        tools_view = "compass";
+        try {
+            orientation_event: any = _window.DeviceOrientationEvent;  # jac:ignore[W1037]
+            if orientation_event and orientation_event.requestPermission {
+                result = await orientation_event.requestPermission();
+                if str(result) != "granted" {
+                    compass_status = "Motion access was not granted.";
+                    alert_message = compass_status;
+                    alert_tone = "warning";
+                    return;
+                }
+            }
+            compass_status = "Live magnetic heading active.";
+            alert_message = compass_status;
+            alert_tone = "success";
+        } except Exception as error {
+            compass_status = "Compass unavailable: " + str(error);
+            alert_message = compass_status;
+            alert_tone = "warning";
+        }
+    }
+
     async def toggle_strobe {
         if strobe_active {
             if strobe_timer.current { clearInterval(strobe_timer.current); }
@@ -648,14 +728,25 @@ def:pub AppShell -> JsxElement {
             strobe_phase.current = False;
             strobe_active = False;
             await set_torch(False);
+            alert_message = "Visual beacon stopped.";
+            alert_tone = "neutral";
             return;
         }
+        enabled = await set_torch(True);
+        if not enabled {
+            alert_message = "Torch unavailable. Check camera permission in Settings.";
+            alert_tone = "warning";
+            return;
+        }
+        strobe_phase.current = True;
         strobe_active = True;
         strobe_timer.current = setInterval(lambda {
             phase = not bool(strobe_phase.current);
             strobe_phase.current = phase;
             set_torch(phase);
         }, 650);
+        alert_message = "Visual beacon active.";
+        alert_tone = "success";
     }
 
     async can with entry {
@@ -667,6 +758,8 @@ def:pub AppShell -> JsxElement {
         await refresh_operational_ledgers();
         platform_name = native_platform();
         await refresh_readiness();
+        await refresh_foundation_status();
+        survival_chat = await load_survival_chat_history();
         resumed = await resume_saved_mesh();
         if resumed is not None {
             mesh_state = resumed.state;
@@ -686,7 +779,11 @@ def:pub AppShell -> JsxElement {
 
     useEffect(lambda {
         orientation_handler = lambda (event: any) {  # jac:ignore[W1037]
-            if event.alpha { heading = float(event.alpha); }
+            if event.webkitCompassHeading is not None {
+                heading = float(event.webkitCompassHeading);
+            } elif event.alpha is not None {
+                heading = float(event.alpha);
+            }
         };
         window.addEventListener("deviceorientation", orientation_handler);  # jac:ignore[W2001]
         return lambda {
@@ -718,7 +815,6 @@ def:pub AppShell -> JsxElement {
         notification_permission == "granted",
         mesh_state == "active"
     );
-    strongest = _strongest_packet(packets);
     urgent_count = len([
         packet for packet in packets
         if packet.status_code != 0 and not packet.is_expired(now)
@@ -761,11 +857,6 @@ def:pub AppShell -> JsxElement {
         drill_low_battery,
         drill_congestion
     );
-    tile_urls = (
-        map_tile_urls(latitude, longitude, 13, 1)
-        if location_ready else []
-    );
-
     if booting {
         return <main className="loading-screen">
             <div className="brand-logo large"></div>
@@ -832,24 +923,6 @@ def:pub AppShell -> JsxElement {
             </div>
         </header>
 
-        <div className="status-rail">
-            <StatusPill
-                label="RADIO"
-                value={"DUAL ROLE" if mesh_state == "active" else mesh_state.upper()}
-                tone={"safe" if mesh_state == "active" else "warning"}
-            />
-            <StatusPill
-                label="LINK"
-                value={network_state.upper()}
-                tone={"warning" if network_state == "offline" else "neutral"}
-            />
-            <StatusPill
-                label="QUEUE"
-                value={str(len(packets))}
-                tone={"danger" if urgent_count > 0 else "neutral"}
-            />
-        </div>
-
         {if alert_message {
             <div key="runtime-alert" className={"alert-strip " + alert_tone}>
                 <TriangleAlert size={17} />
@@ -864,10 +937,9 @@ def:pub AppShell -> JsxElement {
 
         <main className="app-content">
             {if active_tab == "command" {
-                <div key="command-panel" className={"tab-panel command-" + command_view}>
+                <div key="command-panel" className="tab-panel">
                 <section className="page-heading">
                     <div>
-                        <span>FIELD OVERVIEW</span>
                         <h1>Command</h1>
                     </div>
                     <button
@@ -878,13 +950,7 @@ def:pub AppShell -> JsxElement {
                     ><RefreshCw size={19} /></button>
                 </section>
 
-                <div className="mode-switch" role="tablist" aria-label="Command view">
-                    <button className={"active" if command_view == "overview" else ""} onClick={lambda { command_view = "overview"; }}>OVERVIEW</button>
-                    <button className={"active" if command_view == "evidence" else ""} onClick={lambda { command_view = "evidence"; }}>OPERATIONS</button>
-                    <button className={"active" if command_view == "drill" else ""} onClick={lambda { command_view = "drill"; }}>DRILL</button>
-                </div>
-
-                <section className="readiness-band mode-default">
+                <section className="readiness-band">
                     <div className="readiness-score">
                         <strong>{readiness}</strong>
                         <span>/100</span>
@@ -892,7 +958,6 @@ def:pub AppShell -> JsxElement {
                     <div>
                         <span>FIELD READINESS</span>
                         <h2>{"Ready to relay" if readiness >= 70 else "Setup incomplete"}</h2>
-                        <p>{mesh_message}</p>
                     </div>
                     <button
                         className={"mesh-toggle stop" if mesh_state == "active" else "mesh-toggle"}
@@ -904,13 +969,13 @@ def:pub AppShell -> JsxElement {
                     </button>
                 </section>
 
-                <section className="metric-grid mode-default">
+                <section className="metric-grid">
                     <Metric label="ACTIVE REPORTS" value={str(urgent_count)} detail="unexpired local evidence" />
                     <Metric label="RADIO QUEUE" value={str(len(packets))} detail="stored on this device" />
                     <Metric label="PRIVACY" value={privacy_mode} detail="current forwarding policy" />
                 </section>
 
-                <section className="section-band mode-default">
+                <section className="section-band">
                     <div className="section-title">
                         <div>
                             <span>RECENT EVIDENCE</span>
@@ -922,8 +987,7 @@ def:pub AppShell -> JsxElement {
                         {if len(packets) == 0 {
                             <div key="empty-packets" className="empty-state">
                                 <Radio size={28} />
-                                <strong>No radio packets stored</strong>
-                                <span>Listening begins after the native mesh starts.</span>
+                                <strong>No reports yet</strong>
                             </div>
                         }}
                         {for packet in packets[:6] {
@@ -932,26 +996,7 @@ def:pub AppShell -> JsxElement {
                     </div>
                 </section>
 
-                <section className="activity-band mode-default">
-                    <div className="section-title compact">
-                        <div>
-                            <span>DEVICE LOG</span>
-                            <h2>Local activity</h2>
-                        </div>
-                        <Activity size={20} />
-                    </div>
-                    {if len(activity_log) == 0 {
-                        <p key="empty-log" className="muted-copy">No runtime events recorded in this session.</p>
-                    }}
-                    {for (index, item) in enumerate(activity_log) {
-                        <div key={str(index)} className="log-line">
-                            <span>{str(index + 1).zfill(2)}</span>
-                            <p>{item}</p>
-                        </div>
-                    }}
-                </section>
-
-                <section className="section-band mode-panel mode-evidence">
+                <section className="section-band">
                     <div className="section-title">
                         <div><span>INCIDENT SUMMARY</span><h2>Evidence board</h2></div>
                         <ListChecks size={21} />
@@ -972,7 +1017,7 @@ def:pub AppShell -> JsxElement {
                     }}
                 </section>
 
-                <section className="section-band mode-panel mode-evidence">
+                <section className="section-band">
                     <div className="section-title">
                         <div><span>RESPONDER NEEDS</span><h2>Priority board</h2></div>
                         <HeartPulse size={21} />
@@ -991,7 +1036,7 @@ def:pub AppShell -> JsxElement {
                     </div>
                 </section>
 
-                <section className="section-band mode-panel mode-evidence">
+                <section className="section-band">
                     <div className="section-title">
                         <div><span>RESPONDER HANDOFF</span><h2>Privacy-aware export</h2></div>
                         <UploadCloud size={21} />
@@ -1026,7 +1071,7 @@ def:pub AppShell -> JsxElement {
                     <small className="boundary-copy">{str(handoff["boundary"])}</small>
                 </section>
 
-                <section className="section-band mode-panel mode-drill">
+                <section className="section-band">
                     <div className="section-title">
                         <div><span>DETERMINISTIC SCENARIO</span><h2>{drill.scenario}</h2></div>
                         <Gauge size={21} />
@@ -1053,198 +1098,29 @@ def:pub AppShell -> JsxElement {
             }}
 
             {if active_tab == "map" {
-                <div key="map-panel" className={"tab-panel map-" + map_view}>
-                <section className="page-heading">
-                    <div>
-                        <span>NO BASEMAP REQUIRED</span>
-                        <h1>Mesh Plot</h1>
-                    </div>
-                    <button
-                        className="icon-button"
-                        title="Refresh position"
-                        aria-label="Refresh position"
-                        onClick={refresh_location}
-                    ><LocateFixed size={19} /></button>
-                </section>
-
-                <div className="mode-switch" role="tablist" aria-label="Map view">
-                    <button className={"active" if map_view == "local" else ""} onClick={lambda { map_view = "local"; }}>LOCAL</button>
-                    <button className={"active" if map_view == "disasters" else ""} onClick={lambda { map_view = "disasters"; }}>DISASTERS</button>
-                    <button className={"active" if map_view == "offline" else ""} onClick={lambda { map_view = "offline"; }}>OFFLINE</button>
-                </div>
-
-                <section className="coordinate-strip mode-default">
-                    <MapPin size={18} />
-                    <div>
-                        <strong>{f"{latitude:.5f}, {longitude:.5f}" if location_ready else "POSITION UNKNOWN"}</strong>
-                        <span>{f"±{location_accuracy:.0f} m" if location_ready else location_message}</span>
-                    </div>
-                </section>
-
-                <section className="mesh-plot mode-default">
-                    <div className="plot-grid"></div>
-                    <div className="plot-center"><Smartphone size={17} /></div>
-                    {for packet in packets {
-                        <button
-                            key={packet.unique_id()}
-                            className="plot-node"
-                            title={status_label(packet.status_code) + " " + packet.unique_id()}
-                            style={{
-                                "left": f"{_plot_x(packet):.1f}%",
-                                "top": f"{_plot_y(packet):.1f}%",
-                                "backgroundColor": status_color(packet.status_code)
-                            }}
-                        ></button>
-                    }}
-                    <div className="plot-scale">
-                        <span>LOCAL COORDINATE VIEW</span>
-                        <strong>{str(len(packets)) + " SIGNALS"}</strong>
-                    </div>
-                </section>
-
-                <section className="section-band mode-default">
-                    <div className="section-title">
-                        <div><span>ROUTE EVIDENCE</span><h2>Relay paths</h2></div>
-                        <Route size={21} />
-                    </div>
-                    <FactRow icon={<Radio size={18} />} label="Observed packets" value={str(len(packets))} />
-                    <FactRow icon={<CloudOff size={18} />} label="Cloud dependency" value="None for local relay" tone="safe" />
-                    <FactRow icon={<ShieldCheck size={18} />} label="Physical path proof" value="Unverified" tone="warning" />
-                </section>
-
-                <section className="section-band mode-panel mode-disasters">
-                    <div className="section-title">
-                        <div><span>USGS + NOAA + GDACS</span><h2>Disaster notices</h2></div>
-                        <TriangleAlert size={21} />
-                    </div>
-                    <div className="action-strip">
-                        <span>{"SOURCE " + disaster_source.upper()}</span>
-                        <button className="icon-button" title="Refresh disaster feeds" aria-label="Refresh disaster feeds" onClick={refresh_disasters} disabled={busy}>
-                            <RefreshCw size={18} />
-                        </button>
-                    </div>
-                    {if len(disaster_events) == 0 {
-                        <div key="no-disasters" className="empty-state">
-                            <CloudOff size={26} />
-                            <strong>No cached disaster notices</strong>
-                            <span>Refresh while online to cache USGS, NOAA, and GDACS notices.</span>
-                        </div>
-                    }}
-                    <div className="disaster-list">
-                        {for item in disaster_events[:30] {
-                            <article key={str(item["id"])} className="disaster-row">
-                                <span className={"severity " + str(item["severity"]).lower()}></span>
-                                <div>
-                                    <small>{str(item["source"]) + " · " + str(item["severity"])}</small>
-                                    <strong>{str(item["title"])}</strong>
-                                    <p>{str(item["detail"])}</p>
-                                </div>
-                            </article>
-                        }}
-                    </div>
-                </section>
-
-                <section className="section-band mode-panel mode-offline">
-                    <div className="section-title">
-                        <div><span>OPENSTREETMAP CACHE</span><h2>Offline region</h2></div>
-                        <Download size={21} />
-                    </div>
-                    <div className="coordinate-strip embedded">
-                        <MapPin size={18} />
-                        <div>
-                            <strong>{f"{latitude:.5f}, {longitude:.5f}" if location_ready else "POSITION REQUIRED"}</strong>
-                            <span>{str(offline_tiles) + " tiles cached this session"}</span>
-                        </div>
-                    </div>
-                    {if len(tile_urls) > 0 {
-                        <div key="offline-map-preview" className="tile-map">
-                            {for url in tile_urls {
-                                <img key={url} src={url} alt="" loading="lazy" />
-                            }}
-                            <div className="tile-map-center"><MapPin size={18} /></div>
-                        </div>
-                    }}
-                    <button className="secondary-command" onClick={download_local_map} disabled={busy}>
-                        <Download size={17} /> CACHE 5×5 TILE REGION
-                    </button>
-                    <small className="boundary-copy">Cached tiles are a navigation aid, not proof of route safety or current road conditions.</small>
-                </section>
+                <div key="map-panel" className="tab-panel map-tab-panel">
+                    <IncidentMap
+                        packets={packets}
+                        latitude={latitude}
+                        longitude={longitude}
+                        location_ready={location_ready}
+                    />
                 </div>
             }}
 
             {if active_tab == "tools" {
                 <div key="tools-panel" className={"tab-panel tools-" + tools_view}>
                 <section className="page-heading">
-                    <div><span>OFFLINE HARDWARE</span><h1>Field Tools</h1></div>
+                    <div><h1>Field Tools</h1></div>
                     <Wrench size={22} />
                 </section>
 
-                <div className="mode-switch four" role="tablist" aria-label="Field tool">
-                    <button className={"active" if tools_view == "locator" else ""} onClick={lambda { tools_view = "locator"; }}>LOCATOR</button>
-                    <button className={"active" if tools_view == "compass" else ""} onClick={lambda { tools_view = "compass"; }}>COMPASS</button>
-                    <button className={"active" if tools_view == "strobe" else ""} onClick={lambda { tools_view = "strobe"; }}>STROBE</button>
-                    <button className={"active" if tools_view == "ultrasonic" else ""} onClick={lambda { tools_view = "ultrasonic"; }}>ULTRASONIC</button>
+                <div className="mode-switch four field-tools-switch" role="tablist" aria-label="Field tool">
+                    <button id="tool-guide" className={"active" if tools_view == "guide" else ""} onClick={lambda { tools_view = "guide"; }}>GUIDE</button>
+                    <button id="tool-compass" className={"active" if tools_view == "compass" else ""} onClick={enable_compass}>COMPASS</button>
+                    <button id="tool-beacon" className={"active" if tools_view == "strobe" else ""} onClick={lambda { tools_view = "strobe"; }}>BEACON</button>
+                    <button id="tool-sonic" className={"active" if tools_view == "ultrasonic" else ""} onClick={lambda { tools_view = "ultrasonic"; }}>SONIC</button>
                 </div>
-
-                <section className="tool-band mode-default">
-                    <div className="tool-heading">
-                        <div className="tool-icon signal"><LocateFixed size={21} /></div>
-                        <div><span>SIGNAL LOCATOR</span><h2>Nearest report</h2></div>
-                    </div>
-                    {if strongest is not None {
-                        <div key="signal-meter" className="signal-meter">
-                            <div style={{
-                                "width": str(max(8, min(100, strongest.rssi + 110))) + "%"
-                            }}></div>
-                        </div>
-                        <div key="signal-readout" className="tool-readout">
-                            <strong>{str(strongest.rssi) + " dBm"}</strong>
-                            <span>{f"~{estimated_distance_meters(strongest.rssi):.1f} m estimate"}</span>
-                        </div>
-                    } else {
-                        <p key="empty-signal" className="muted-copy">No received RSSI sample is available.</p>
-                    }}
-                </section>
-
-                <section className="tool-grid mode-default">
-                    <div className="tool-band compass-tool">
-                        <div className="tool-heading">
-                            <div className="tool-icon compass"><Compass size={21} /></div>
-                            <div><span>COMPASS</span><h2>{f"{heading:.0f}°"}</h2></div>
-                        </div>
-                        <div className="compass-dial">
-                            <div style={{"transform": f"rotate({heading:.1f}deg)"}}></div>
-                            <span>N</span>
-                        </div>
-                    </div>
-
-                    <div className="tool-band strobe-tool">
-                        <div className="tool-heading">
-                            <div className="tool-icon strobe"><Flashlight size={21} /></div>
-                            <div><span>STROBE</span><h2>{"ACTIVE" if strobe_active else "READY"}</h2></div>
-                        </div>
-                        <button className={"tool-action active" if strobe_active else "tool-action"} onClick={toggle_strobe}>
-                            <Flashlight size={18} />
-                            {"STOP STROBE" if strobe_active else "START STROBE"}
-                        </button>
-                    </div>
-                </section>
-
-                <section className="tool-band mode-default">
-                    <div className="tool-heading">
-                        <div className="tool-icon morse"><Languages size={21} /></div>
-                        <div><span>MORSE</span><h2>Signal encoder</h2></div>
-                    </div>
-                    <label className="field-label">
-                        MESSAGE
-                        <input
-                            value={morse_input}
-                            maxLength={32}
-                            onChange={lambda (event: ChangeEvent) { morse_input = event.target.value; }}
-                        />
-                    </label>
-                    <output className="morse-output">{to_morse(morse_input)}</output>
-                </section>
 
                 <section className="tool-band mode-panel mode-compass detail-tool">
                     <div className="tool-heading">
@@ -1255,8 +1131,10 @@ def:pub AppShell -> JsxElement {
                         <div style={{"transform": f"rotate({heading:.1f}deg)"}}></div>
                         <span>N</span>
                     </div>
-                    <FactRow icon={<Smartphone size={18} />} label="Sensor source" value="Device orientation" />
-                    <FactRow icon={<ShieldCheck size={18} />} label="Calibration" value="Verify before navigation" tone="warning" />
+                    <p className="tool-status">{compass_status}</p>
+                    <button className="tool-action" onClick={enable_compass}>
+                        <Compass size={18} /> ENABLE COMPASS
+                    </button>
                 </section>
 
                 <section className="tool-band mode-panel mode-strobe detail-tool">
@@ -1268,7 +1146,6 @@ def:pub AppShell -> JsxElement {
                         <Flashlight size={22} />
                         {"STOP STROBE" if strobe_active else "START STROBE"}
                     </button>
-                    <p className="muted-copy">The native torch flashes at a visible rescue cadence while the app remains active.</p>
                 </section>
 
                 <section className="tool-band mode-panel mode-ultrasonic detail-tool">
@@ -1306,25 +1183,68 @@ def:pub AppShell -> JsxElement {
                     {for item in ultrasonic_log {
                         <div key={item} className="log-line"><span>FSK</span><p>{item}</p></div>
                     }}
-                    <small className="boundary-copy">Acoustic detection is a local signal observation, not authenticated packet delivery.</small>
+                </section>
+
+                <section className="tool-band mode-panel mode-guide survival-guide">
+                    <div className="survival-chat-toolbar">
+                        <div className="survival-guide-status">
+                            <Sparkles size={17} />
+                            <div><strong>Survival Guide</strong><small>{foundation_status.availability}</small></div>
+                        </div>
+                        <button className="icon-button survival-clear" title="Clear chat" aria-label="Clear chat history" onClick={erase_survival_chat} disabled={survival_sending or len(survival_chat) == 0}>
+                            <Trash2 size={18} />
+                        </button>
+                    </div>
+                    <div className="survival-transcript" aria-live="polite">
+                        {if len(survival_chat) == 0 {
+                            <div key="guide-empty" className="survival-empty">
+                                <MessageCircle size={30} />
+                                <h2>How can I help?</h2>
+                            </div>
+                        }}
+                        {for (index, item) in enumerate(survival_chat) {
+                            <article key={str(item.timestamp) + "-" + str(index)} className={"survival-message " + item.role}>
+                                <p>{item.content}</p>
+                                {if item.role == "assistant" {
+                                    <div className="survival-message-actions">
+                                        <button title="Copy reply" aria-label="Copy guide reply" onClick={lambda { copy_survival_message(item.content); }}>
+                                            <Copy size={17} />
+                                        </button>
+                                    </div>
+                                }}
+                            </article>
+                        }}
+                        {if survival_sending {
+                            <div key="guide-thinking" className="survival-thinking" aria-label="Guide is responding">
+                                <span></span><span></span><span></span>
+                            </div>
+                        }}
+                    </div>
+                    <div className="survival-composer">
+                        <textarea
+                            value={survival_input}
+                            maxLength={1200}
+                            rows={1}
+                            aria-label="Message Survival Guide"
+                            placeholder="Message Survival Guide"
+                            onChange={lambda (event: ChangeEvent) { survival_input = event.target.value; }}
+                        ></textarea>
+                        <button className="survival-send" title="Send message" aria-label="Send message" onClick={lambda { send_survival_message(evidence.facts + evidence.warnings + evidence.unknowns); }} disabled={survival_sending or not survival_input.strip()}>
+                            <Send size={19} />
+                        </button>
+                    </div>
                 </section>
                 </div>
             }}
 
             {if active_tab == "sos" {
-                <div key="distress-panel" className={"tab-panel sos-" + sos_view}>
+                <div key="distress-panel" className="tab-panel">
                 <section className="page-heading distress-heading">
-                    <div><span>25-BYTE FIELD REPORT</span><h1>Distress</h1></div>
+                    <div><h1>Distress</h1></div>
                     <Siren size={24} />
                 </section>
 
-                <div className="mode-switch" role="tablist" aria-label="Distress view">
-                    <button className={"active" if sos_view == "broadcast" else ""} onClick={lambda { sos_view = "broadcast"; }}>BROADCAST</button>
-                    <button className={"active" if sos_view == "lifecycle" else ""} onClick={lambda { sos_view = "lifecycle"; }}>LIFECYCLE</button>
-                    <button className={"active" if sos_view == "history" else ""} onClick={lambda { sos_view = "history"; }}>HISTORY</button>
-                </div>
-
-                <section className="location-lock mode-default">
+                <section className="location-lock">
                     <div className={"lock-indicator ready" if location_ready else "lock-indicator"}>
                         <MapPin size={20} />
                     </div>
@@ -1338,43 +1258,67 @@ def:pub AppShell -> JsxElement {
                     </button>
                 </section>
 
-                <section className="status-selector mode-default">
-                    <button className={"selected critical" if selected_status == 1 else ""} onClick={lambda { selected_status = 1; distress_armed = False; }}>
-                        <Siren size={20} /><strong>RESCUE</strong><span>Immediate danger</span>
+                <section
+                    className={"status-selector status-" + str(selected_status)}
+                    role="radiogroup"
+                    aria-label="Emergency type"
+                    aria-orientation="horizontal"
+                >
+                    <button
+                        className={"critical selected" if selected_status == 1 else "critical"}
+                        role="radio"
+                        aria-checked={selected_status == 1}
+                        aria-label="Rescue, immediate danger"
+                        onClick={lambda { selected_status = 1; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><Siren size={21} /></span>
+                        <strong>RESCUE</strong>
                     </button>
-                    <button className={"selected medical" if selected_status == 2 else ""} onClick={lambda { selected_status = 2; distress_armed = False; }}>
-                        <HeartPulse size={20} /><strong>MEDICAL</strong><span>Urgent care</span>
+                    <button
+                        className={"medical selected" if selected_status == 2 else "medical"}
+                        role="radio"
+                        aria-checked={selected_status == 2}
+                        aria-label="Medical, urgent care"
+                        onClick={lambda { selected_status = 2; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><HeartPulse size={21} /></span>
+                        <strong>MEDICAL</strong>
                     </button>
-                    <button className={"selected trapped" if selected_status == 3 else ""} onClick={lambda { selected_status = 3; distress_armed = False; }}>
-                        <TriangleAlert size={20} /><strong>TRAPPED</strong><span>Pinned or blocked</span>
+                    <button
+                        className={"trapped selected" if selected_status == 3 else "trapped"}
+                        role="radio"
+                        aria-checked={selected_status == 3}
+                        aria-label="Trapped, pinned or blocked"
+                        onClick={lambda { selected_status = 3; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><TriangleAlert size={21} /></span>
+                        <strong>TRAPPED</strong>
                     </button>
-                    <button className={"selected supplies" if selected_status == 4 else ""} onClick={lambda { selected_status = 4; distress_armed = False; }}>
-                        <PackageOpen size={20} /><strong>SUPPLIES</strong><span>Water or food</span>
+                    <button
+                        className={"supplies selected" if selected_status == 4 else "supplies"}
+                        role="radio"
+                        aria-checked={selected_status == 4}
+                        aria-label="Supplies, water or food"
+                        onClick={lambda { selected_status = 4; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><PackageOpen size={21} /></span>
+                        <strong>SUPPLIES</strong>
                     </button>
                 </section>
 
                 <button
-                    className={"distress-command armed mode-default" if distress_armed else "distress-command mode-default"}
+                    className={"distress-command armed" if distress_armed else "distress-command"}
                     onClick={send_selected_status}
                     disabled={busy}
                 >
-                    <Siren size={24} />
-                    <span>
+                    <span className="distress-command-icon"><Siren size={30} /></span>
+                    <span className="distress-command-copy">
                         <small>{status_label(selected_status)}</small>
                         <strong>{"CONFIRM RADIO PACKET" if distress_armed else "ARM DISTRESS ACTION"}</strong>
                     </span>
                 </button>
-                <button className="safe-command mode-default" onClick={mark_safe} disabled={busy or not location_ready}>
-                    <CircleCheck size={20} />
-                    BROADCAST I AM SAFE
-                </button>
 
-                <div className="proof-boundary compact mode-default">
-                    <ShieldCheck size={18} />
-                    <p>Broadcast state confirms only this device's local radio call, not reception or response.</p>
-                </div>
-
-                <section className="section-band mode-panel mode-lifecycle">
+                <section className="section-band">
                     <div className="section-title">
                         <div><span>PACKET EVIDENCE</span><h2>Broadcast lifecycle</h2></div>
                         <Activity size={21} />
@@ -1394,7 +1338,7 @@ def:pub AppShell -> JsxElement {
                     </div>
                 </section>
 
-                <section className="section-band mode-panel mode-history">
+                <section className="section-band">
                     <div className="section-title">
                         <div><span>LOCAL LEDGER</span><h2>Packet history</h2></div>
                         <Database size={21} />
@@ -1414,7 +1358,7 @@ def:pub AppShell -> JsxElement {
             {if active_tab == "systems" {
                 <div key="systems-panel" className={"tab-panel systems-" + systems_view}>
                 <section className="page-heading">
-                    <div><span>DEVICE READINESS</span><h1>Systems</h1></div>
+                    <div><h1>Systems</h1></div>
                     <SlidersHorizontal size={23} />
                 </section>
 
@@ -1427,16 +1371,13 @@ def:pub AppShell -> JsxElement {
 
                 <section className="section-band mode-default">
                     <div className="section-title">
-                        <div><span>NATIVE SURFACE</span><h2>{platform_name.upper()}</h2></div>
+                        <div><h2>Device</h2></div>
                         <Smartphone size={21} />
                     </div>
                     <FactRow icon={<Bluetooth size={18} />} label="BLE permission" value={ble_permission} tone={"safe" if ble_permission == "granted" else "warning"} />
                     <FactRow icon={<Bell size={18} />} label="Notifications" value={notification_permission} tone={"safe" if notification_permission == "granted" else "warning"} />
-                    <FactRow icon={<Radio size={18} />} label="BLE plugin" value={plugin_version} />
-                    <FactRow icon={<Activity size={18} />} label="Runtime state" value={mesh_state} tone={"safe" if mesh_state == "active" else "warning"} />
-                    <button className="secondary-command" onClick={open_native_settings}>
-                        <ExternalLink size={17} /> OPEN APP SETTINGS
-                    </button>
+                    <FactRow icon={<Sparkles size={18} />} label="On-device AI" value={foundation_status.availability} tone={"safe" if foundation_status.available else "warning"} />
+                    <FactRow icon={<Activity size={18} />} label="Mesh" value={mesh_state} tone={"safe" if mesh_state == "active" else "warning"} />
                 </section>
 
                 <section className="setting-band mode-default">
@@ -1462,22 +1403,6 @@ def:pub AppShell -> JsxElement {
                         <button className={"active" if battery_mode == "Battery Saver" else ""} onClick={lambda { choose_battery("Battery Saver"); }}>SAVER</button>
                     </div>
                 </section>
-
-                <section className="section-band evidence-boundaries mode-default">
-                    <div className="section-title">
-                        <div><span>PROOF BOUNDARIES</span><h2>Evidence state</h2></div>
-                        <ShieldCheck size={21} />
-                    </div>
-                    <FactRow icon={<Check size={18} />} label="Jac source build" value="Locally verifiable" tone="safe" />
-                    <FactRow icon={<Radio size={18} />} label="Physical BLE relay" value="Requires two devices" tone="warning" />
-                    <FactRow icon={<UserRound size={18} />} label="Responder receipt" value="Unknown" tone="warning" />
-                    <FactRow icon={<ShieldCheck size={18} />} label="Rescue outcome" value="Unknown" tone="warning" />
-                </section>
-
-                <button className="destructive-command mode-default" onClick={erase_packet_history}>
-                    <Trash2 size={18} />
-                    CLEAR LOCAL PACKET HISTORY
-                </button>
 
                 <section className="section-band mode-panel mode-sync">
                     <div className="section-title">
@@ -1556,19 +1481,19 @@ def:pub AppShell -> JsxElement {
         </main>
 
         <nav className="bottom-nav" aria-label="Primary">
-            <button className={"active" if active_tab == "command" else ""} onClick={lambda { active_tab = "command"; }}>
+            <button id="nav-command" title="Command" aria-label="Command" className={"active" if active_tab == "command" else ""} onClick={lambda { active_tab = "command"; }}>
                 <Radio size={20} /><span>COMMAND</span>
             </button>
-            <button className={"active" if active_tab == "map" else ""} onClick={lambda { active_tab = "map"; }}>
+            <button id="nav-map" title="Map" aria-label="Map" className={"active" if active_tab == "map" else ""} onClick={lambda { active_tab = "map"; }}>
                 <MapIcon size={20} /><span>MAP</span>
             </button>
-            <button className={"active" if active_tab == "tools" else ""} onClick={lambda { active_tab = "tools"; }}>
+            <button id="nav-tools" title="Tools" aria-label="Tools" className={"active" if active_tab == "tools" else ""} onClick={lambda { active_tab = "tools"; }}>
                 <Wrench size={20} /><span>TOOLS</span>
             </button>
-            <button className={"active distress" if active_tab == "sos" else "distress"} onClick={lambda { active_tab = "sos"; }}>
+            <button id="nav-sos" title="Distress" aria-label="Distress" className={"active distress" if active_tab == "sos" else "distress"} onClick={lambda { active_tab = "sos"; }}>
                 <Siren size={21} /><span>DISTRESS</span>
             </button>
-            <button className={"active" if active_tab == "systems" else ""} onClick={lambda { active_tab = "systems"; }}>
+            <button id="nav-systems" title="Systems" aria-label="Systems" className={"active" if active_tab == "systems" else ""} onClick={lambda { active_tab = "systems"; }}>
                 <SlidersHorizontal size={20} /><span>SYSTEMS</span>
             </button>
         </nav>

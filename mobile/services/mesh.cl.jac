@@ -15,10 +15,12 @@ glob PACKET_CHARACTERISTIC_UUID: str = "12345678-1234-1234-1234-123456789ABD";
 
 glob _event_sink: any = None;  # jac:ignore[W1037]
 glob _mesh_running: bool = False;
+glob _mesh_starting: bool = False;
 glob _listeners_ready: bool = False;
 glob _current_packet_bytes: list[int] = [];
 glob _connecting_ids: list[str] = [];
 glob _connected_ids: list[str] = [];
+glob _retry_after: dict[str, int] = {};
 
 
 obj:pub MeshStartState {
@@ -115,6 +117,13 @@ def _emit_packet(bytes: list[int], rssi: int, source: str) {
 }
 
 
+async def _wait(milliseconds: int) {
+    await new(Promise, lambda (resolve: any, reject: any) {
+        setTimeout(lambda { resolve.call(None, None); }, milliseconds);
+    });
+}
+
+
 async def:pub inspect_native_readiness -> NativeReadiness {
     platform = native_platform();
     if not is_native() {
@@ -171,6 +180,9 @@ async def _handle_discovered(event: any) {  # jac:ignore[W1037]
     device = event.device;
     device_id = str(device.deviceId);
     if device_id in _connecting_ids or device_id in _connected_ids { return; }
+    if device_id in _retry_after and int(Date.now()) < _retry_after[device_id] {
+        return;
+    }
     _connecting_ids = _connecting_ids + [device_id];
     _emit("peer", "Discovered nearby SafeRelay peer", {"deviceId": device_id});
 
@@ -203,9 +215,13 @@ async def _handle_discovered(event: any) {  # jac:ignore[W1037]
             });
         }
         _connected_ids = _connected_ids + [device_id];
+        _retry_after[device_id] = 0;
         _emit("peer", "Connected to nearby SafeRelay peer", {"deviceId": device_id});
     } except Exception as error {
+        _retry_after[device_id] = int(Date.now()) + 5000;
         _emit("warning", "Peer connection did not complete: " + str(error));
+        try { await BluetoothLowEnergy.disconnect({"deviceId": device_id}); }
+        except Exception {}
     } finally {
         _connecting_ids = [
             item for item in _connecting_ids if item != device_id
@@ -295,7 +311,16 @@ async def:pub start_mesh -> MeshStartState {
             platform=platform
         );
     }
+    if _mesh_starting {
+        return MeshStartState(
+            state="starting",
+            message="Mesh relay startup is already in progress.",
+            native=True,
+            platform=platform
+        );
+    }
 
+    _mesh_starting = True;
     try {
         permission = await BluetoothLowEnergy.requestPermissions();
         if str(permission.bluetooth) != "granted" {
@@ -337,10 +362,14 @@ async def:pub start_mesh -> MeshStartState {
                     "indicate": True,
                     "authenticatedSignedWrites": False,
                     "extendedProperties": False
-                },
-                "value": _current_packet_bytes
+                }
             }]
         });
+        # A non-nil cached value, including empty data, is incompatible with
+        # this writable/notifiable characteristic and makes CoreBluetooth abort.
+        # The plugin resolves addGattService before CoreBluetooth reports that
+        # the service is published. Avoid advertising an incomplete GATT table.
+        await _wait(750);
         await BluetoothLowEnergy.startAdvertising({
             "name": "SafeRelay",
             "services": [SERVICE_UUID],
@@ -350,7 +379,7 @@ async def:pub start_mesh -> MeshStartState {
         await BluetoothLowEnergy.startScan({
             "services": [SERVICE_UUID],
             "timeout": 0,
-            "allowDuplicates": False
+            "allowDuplicates": True
         });
 
         if platform == "android" {
@@ -381,6 +410,8 @@ async def:pub start_mesh -> MeshStartState {
             native=True,
             platform=platform
         );
+    } finally {
+        _mesh_starting = False;
     }
 }
 
