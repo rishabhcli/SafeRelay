@@ -95,19 +95,20 @@ production.
 
 ## JacHammer
 
-The monorepo publishes this folder to
-[`rishabhcli/SafeRelay-web`](https://github.com/rishabhcli/SafeRelay-web) after
-every push to `main` that changes `web/`. JacHammer must track that web-only
-repository, not the `rishabhcli/SafeRelay` monorepo.
+[`rishabhcli/SafeRelay`](https://github.com/rishabhcli/SafeRelay) is the
+canonical source and the only submission repository. After every push to
+`main` that changes `web/`, its deployment workflow publishes only this
+directory to JacHammer's isolated build source. The mobile and native project
+trees never enter the hosted web build context.
 
-1. Import `https://github.com/rishabhcli/SafeRelay-web` in
-   [JacHammer](https://jachammer.ai/).
-2. Open **Settings > Environment** and add the two required secrets.
-3. Start Preview and complete the acceptance checks below.
-4. Use a sandbox deployment for the release candidate.
-5. Promote the same verified project state to a permanent production
+1. Open the SafeRelay project in [JacHammer](https://jachammer.ai/).
+2. Pull the latest published web source.
+3. Open **Settings > Environment** and add the two required secrets.
+4. Start Preview and complete the acceptance checks below.
+5. Use a sandbox deployment for the release candidate.
+6. Promote the same verified project state to a permanent production
    deployment.
-6. Configure a custom domain only after the platform URL passes all checks.
+7. Configure a custom domain only after the platform URL passes all checks.
 
 Restart Preview after changing environment values so the Jac process receives
 the new configuration.
