@@ -31,7 +31,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>SafeRelay uses the device torch for an offline visual distress signal. It does not capture photos or video.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>SafeRelay attaches your current position only when you create a field report.</string>
+	<string>SafeRelay uses your location to show your position on the incident map and attach coordinates when you create a field report.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>SafeRelay listens for local 15–20 kHz field signals only while you enable the ultrasonic receiver.</string>
 	<key>UIBackgroundModes</key>

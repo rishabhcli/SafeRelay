@@ -21,8 +21,11 @@ public final class SafeRelayFoundationModelsPlugin: CAPPlugin, CAPBridgedPlugin 
     context explicitly says so. Refuse and redirect requests for self-harm,
     weapons, poisoning, illegal activity, or dangerous medical procedures.
     Treat field context as local observations, not confirmed outcomes.
-    Answer directly with concise plain text and numbered steps. Never emit JSON,
-    XML, tool calls, tool names, code fences, schemas, or response metadata.
+    Answer the latest message directly and continue the conversation naturally.
+    Do not restate earlier advice unless it is essential to safety; when it is,
+    mention it briefly and add useful new information. Use numbered steps only
+    when the user needs an ordered procedure. Never emit JSON, XML, tool calls,
+    tool names, code fences, schemas, or response metadata.
     """
 
     @objc public func status(_ call: CAPPluginCall) {
@@ -54,19 +57,25 @@ public final class SafeRelayFoundationModelsPlugin: CAPPlugin, CAPBridgedPlugin 
 
         let fieldContext = call.getString("fieldContext", "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let transcript = messages.map { message in
+        let latestUserMessage = messages.last?.content ?? ""
+        let recentConversation = messages.dropLast().suffix(8).map { message in
             let speaker = message.role == "user" ? "User" : "Guide"
-            return "\(speaker): \(message.content)"
+            return "\(speaker): \(String(message.content.prefix(600)))"
         }.joined(separator: "\n")
         let prompt = """
-        Local field context (may be empty; do not treat it as confirmed outcome):
-        \(String(fieldContext.prefix(2_500)))
+        Recent conversation for continuity:
+        \(recentConversation.isEmpty ? "(none)" : recentConversation)
 
-        Conversation:
-        \(transcript)
+        Latest user message:
+        \(latestUserMessage)
 
-        Answer the user's latest question directly in 3 to 6 numbered plain-text
-        steps. Do not call or describe a tool and do not return structured data.
+        Relevant local field observations (may be empty and are not confirmed
+        outcomes):
+        \(String(fieldContext.prefix(2_000)))
+
+        Reply only to the latest user message. Build on the conversation without
+        repeating the Guide's previous answer. Be concise and conversational.
+        Use steps only when an ordered procedure is genuinely useful.
         """
 
         Task {
@@ -74,16 +83,41 @@ public final class SafeRelayFoundationModelsPlugin: CAPPlugin, CAPBridgedPlugin 
                 let session = LanguageModelSession(model: model, instructions: instructions)
                 let response = try await session.respond(to: prompt)
                 var reply = String(response.content.prefix(2_400))
-                if requiresPlainTextRetry(reply) {
-                    let corrected = try await session.respond(
+                let previousReply = messages.dropLast().last(
+                    where: { $0.role == "assistant" }
+                )?.content
+                if requiresPlainTextRetry(reply)
+                    || substantiallyRepeats(reply, previousReply) {
+                    let revisionSession = LanguageModelSession(
+                        model: model,
+                        instructions: """
+                        Answer only the new detail in the user's latest message.
+                        Never provide a general survival checklist or recap prior
+                        advice. Use at most three short conversational sentences.
+                        Do not use a numbered list, structured data, or tool calls.
+                        """
+                    )
+                    let corrected = try await revisionSession.respond(
                         to: """
-                        Your previous output was not user-facing guidance. Answer
-                        the user's latest question now with only 3 to 6 concise
-                        numbered plain-text steps. Do not emit a tool call, JSON,
-                        a schema, or metadata.
+                        Latest message:
+                        \(latestUserMessage)
+
+                        Prior answer to avoid:
+                        \(String((previousReply ?? "").prefix(1_200)))
+
+                        Give only new, specific guidance for the latest message.
+                        Do not reuse any sentence, step, or opening phrase from
+                        the prior answer.
                         """
                     )
                     reply = String(corrected.content.prefix(2_400))
+                }
+                if substantiallyRepeats(reply, previousReply) {
+                    reply = """
+                    I do not want to repeat the earlier checklist. What changed \
+                    since your last message, and which single decision do you \
+                    need help with right now?
+                    """
                 }
                 call.resolve([
                     "available": true,
@@ -164,5 +198,31 @@ public final class SafeRelayFoundationModelsPlugin: CAPPlugin, CAPBridgedPlugin 
             return false
         }
         return normalizedReply(trimmed) == trimmed
+    }
+
+    private func substantiallyRepeats(
+        _ candidate: String,
+        _ previous: String?
+    ) -> Bool {
+        guard let previous else { return false }
+        let candidateWords = significantWords(in: candidate)
+        let previousWords = significantWords(in: previous)
+        guard candidateWords.count >= 8, previousWords.count >= 8 else {
+            return candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+                .caseInsensitiveCompare(
+                    previous.trimmingCharacters(in: .whitespacesAndNewlines)
+                ) == .orderedSame
+        }
+        let shared = candidateWords.intersection(previousWords).count
+        let smallerCount = min(candidateWords.count, previousWords.count)
+        return Double(shared) / Double(smallerCount) >= 0.42
+    }
+
+    private func significantWords(in content: String) -> Set<String> {
+        Set(
+            content.lowercased()
+                .components(separatedBy: .alphanumerics.inverted)
+                .filter { $0.count > 3 }
+        )
     }
 }

@@ -7,6 +7,9 @@
     "iosScheme": "capacitor"
   },
   "plugins": {
+    "LocalNotifications": {
+      "presentationOptions": ["banner", "list", "sound", "badge"]
+    },
     "SystemBars": {
       "insetsHandling": "disable",
       "style": "DARK",
