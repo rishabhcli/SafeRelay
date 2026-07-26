@@ -2,54 +2,45 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>SafeRelay icon - flattened preview</title>
   <g id="01-black-background"><rect width="1024" height="1024" fill="#000000"/></g>
-<g id="02-triangle-links">
-      <circle cx="456.60" cy="368.00" r="10" fill="#FFFFFF"/>
-<circle cx="415.05" cy="440.00" r="10" fill="#FFFFFF"/>
-<circle cx="373.50" cy="512.00" r="10" fill="#FFFFFF"/>
-<circle cx="331.95" cy="584.00" r="10" fill="#FFFFFF"/>
-<circle cx="290.40" cy="656.00" r="10" fill="#FFFFFF"/>
-      <circle cx="567.40" cy="368.00" r="10" fill="#FFFFFF"/>
-<circle cx="608.95" cy="440.00" r="10" fill="#FFFFFF"/>
-<circle cx="650.50" cy="512.00" r="10" fill="#FFFFFF"/>
-<circle cx="692.05" cy="584.00" r="10" fill="#FFFFFF"/>
-<circle cx="733.60" cy="656.00" r="10" fill="#FFFFFF"/>
-      <circle cx="345.80" cy="752.00" r="10" fill="#FFFFFF"/>
-<circle cx="428.90" cy="752.00" r="10" fill="#FFFFFF"/>
-<circle cx="512.00" cy="752.00" r="10" fill="#FFFFFF"/>
-<circle cx="595.10" cy="752.00" r="10" fill="#FFFFFF"/>
-<circle cx="678.20" cy="752.00" r="10" fill="#FFFFFF"/>
+<g id="02-sos-ring">
+      <circle cx="512" cy="592" r="168" fill="#FFFFFF"/>
     </g>
-<g id="03-device-rings">
-      <circle cx="512" cy="272" r="66" fill="#FFFFFF"/>
-      <circle cx="235" cy="752" r="66" fill="#FFFFFF"/>
-      <circle cx="789" cy="752" r="66" fill="#FFFFFF"/>
+<g id="03-sos-beacon">
+      <circle cx="512" cy="592" r="154" fill="#FF1F3D"/>
     </g>
-<g id="04-device-nodes">
-      <circle cx="512" cy="272" r="55" fill="#FF1F3D"/>
-      <circle cx="235" cy="752" r="55" fill="#FF1F3D"/>
-      <circle cx="789" cy="752" r="55" fill="#FF1F3D"/>
-    </g>
-<g id="05-device-glyphs">
-      <rect x="500" y="253" width="24" height="38" rx="6" fill="#FFFFFF"/>
-      <rect x="223" y="733" width="24" height="38" rx="6" fill="#FFFFFF"/>
-      <rect x="777" y="733" width="24" height="38" rx="6" fill="#FFFFFF"/>
-    </g>
-<g id="06-sos-ring">
-      <circle cx="512" cy="592" r="142" fill="#FFFFFF"/>
-    </g>
-<g id="07-sos-beacon">
-      <circle cx="512" cy="592" r="129" fill="#FF1F3D"/>
-    </g>
-<g id="08-sos">
+<g id="04-sos">
       <text
         x="512"
-        y="632"
+        y="637"
         text-anchor="middle"
         font-family="Arial"
-        font-size="100"
+        font-size="112"
         font-weight="700"
         letter-spacing="5"
         fill="#FFFFFF"
       >SOS</text>
+    </g>
+<g id="05-triangle-links">
+      <path d="M 476.61 298.70 L 240.39 717.30" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-dasharray="61.77 22"/>
+<path d="M 547.39 298.70 L 783.61 717.30" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-dasharray="61.77 22"/>
+<path d="M 249.00 780.00 L 775.00 780.00" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-dasharray="69.33 22"/>
+    </g>
+<g id="06-phone-frames">
+      <rect x="478" y="182" width="68" height="108" rx="16" fill="#FFFFFF"/>
+      <rect x="171" y="726" width="68" height="108" rx="16" fill="#FFFFFF"/>
+      <rect x="785" y="726" width="68" height="108" rx="16" fill="#FFFFFF"/>
+    </g>
+<g id="07-phone-screens">
+      <rect x="487" y="194" width="50" height="80" rx="9" fill="#FF1F3D"/>
+      <rect x="180" y="738" width="50" height="80" rx="9" fill="#FF1F3D"/>
+      <rect x="794" y="738" width="50" height="80" rx="9" fill="#FF1F3D"/>
+    </g>
+<g id="08-phone-details">
+      <rect x="503" y="187" width="18" height="4" rx="2" fill="#000000"/>
+<rect x="503" y="280" width="18" height="4" rx="2" fill="#000000"/>
+      <rect x="196" y="731" width="18" height="4" rx="2" fill="#000000"/>
+<rect x="196" y="824" width="18" height="4" rx="2" fill="#000000"/>
+      <rect x="810" y="731" width="18" height="4" rx="2" fill="#000000"/>
+<rect x="810" y="824" width="18" height="4" rx="2" fill="#000000"/>
     </g>
 </svg>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>SafeRelay icon - Dashed triangle links</title>
+  <path d="M 476.61 298.70 L 240.39 717.30" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-dasharray="61.77 22"/>
+<path d="M 547.39 298.70 L 783.61 717.30" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-dasharray="61.77 22"/>
+<path d="M 249.00 780.00 L 775.00 780.00" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" stroke-dasharray="69.33 22"/>
+</svg>
