@@ -20,12 +20,10 @@ SafeRelay uses Jac 0.34.7 as the full application runtime:
 
 - **One language:** backend logic, graph schema, tests, routes,
   and JSX-like client components are all Jac.
-- **Graph persistence:** authenticated source records attach to the operator's
-  persistent Jac root.
-- **Typed protected RPC:** `def:protect` functions become authenticated,
+- **Graph persistence:** verified source records attach to the shared public
+  Jac root.
+- **Typed public RPC:** `def:pub` functions become anonymous,
   client-callable endpoints with generated types.
-- **Per-operator isolation:** Jac authentication maps every operator to a
-  private persistent root graph.
 - **One runtime:** `jac start` builds the client and serves the UI, APIs, and
   graph state together.
 - **Live public feeds:** USGS earthquake and NWS severe-weather refreshes run on
@@ -40,7 +38,6 @@ SafeRelay uses Jac 0.34.7 as the full application runtime:
 Install [Jac](https://www.jac-lang.org/install/) and then:
 
 ```bash
-export JWT_SECRET="$(openssl rand -hex 32)"
 export PROMETHEUS_ADMIN_PASSWORD="$(openssl rand -base64 32)"
 export MAPBOX_ACCESS_TOKEN="<public Mapbox token>"
 jac install
@@ -73,11 +70,10 @@ honest empty source states, and legacy generated-record removal. See
 
 ```mermaid
 flowchart LR
-    UI["Jac client components"] --> AUTH["Jac authentication"]
+    UI["Jac client components"] --> RPC["Typed public RPC"]
     MOBILE["SafeRelay mobile"] --> RELAY["Public Jac signal ingestion"]
     RELAY --> SHARED["Shared cloud signal graph"]
-    AUTH --> RPC["Typed def:protect RPC"]
-    RPC --> ROOT["Per-operator persistent root graph"]
+    RPC --> ROOT["Shared public root graph"]
     ROOT --> CACHE["Verified source cache"]
     CACHE --> USGS["USGS earthquake records"]
     CACHE --> NWS["NWS severe-weather records"]
@@ -90,31 +86,30 @@ web runtime.
 ## Source Layout
 
 ```text
-main.jac                     Application entry point and client export
-saferelay/store.jac         Verified source cache and protected refresh endpoints
-saferelay/store_test.jac    Evidence-boundary tests
-saferelay/AppShell.jac      Client router
-saferelay/LoginPage.jac     Jac-native authentication
-saferelay/LandingPage.jac   Public experience
-saferelay/VerifiedCommandCenter.jac Active evidence monitor
-styles/global.css            Responsive application styling
-jac.toml                     Jac runtime, client, auth, and test configuration
-PRODUCTION.md                Production and JacHammer runbook
-PARITY.md                    Old-to-Jac functional parity contract
+main.jac                              Application entry point and client export
+saferelay/store.jac                  Verified source cache and public endpoints
+saferelay/store_test.jac             Evidence-boundary tests
+saferelay/AppShell.jac               Public client router
+saferelay/LandingPage.jac            Public experience
+saferelay/VerifiedCommandCenter.jac  Active evidence monitor
+styles/global.css                     Responsive application styling
+jac.toml                              Jac runtime, client, and test configuration
+PRODUCTION.md                         Production and JacHammer runbook
+PARITY.md                             Old-to-Jac functional parity contract
 ```
 
-## Protected Contract
+## Public Contract
 
 | Surface | Purpose |
 | --- | --- |
 | `get_disaster_feed` | Read only cached USGS/NWS source records |
 | `refresh_disaster_feed` | Refresh USGS/NWS without generated fallback records |
 
-Those two operator surfaces require a valid Jac session and run against that
-operator's root graph. `cloud_relay_health` and `ingest_mobile_signal` are
-public mobile endpoints; ingestion validates bounds, deduplicates by message
-ID, stores an unverified mobile report, and never claims responder action. See
-[PRODUCTION.md](./PRODUCTION.md) for deployment and acceptance gates.
+All four endpoints are public. Hazard records and anonymous mobile relay
+signals use the shared Jac graph. Ingestion validates bounds, deduplicates by
+message ID, stores an unverified mobile report, and never claims responder
+action. See [PRODUCTION.md](./PRODUCTION.md) for deployment and acceptance
+gates.
 
 ## License
 

@@ -122,7 +122,7 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
         );
     }
 
-    for signal in [root -->][?:MobileRelaySignal] {
+    for signal in [root.shared -->][?:MobileRelaySignal] {
         if signal.message_id == message_id {
             return CloudRelayReceipt(
                 success=True,
@@ -134,7 +134,7 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
         }
     }
 
-    root ++> MobileRelaySignal(
+    signal: MobileRelaySignal = root.shared ++> MobileRelaySignal(
         message_id=message_id,
         origin_device_id=origin_device_id,
         latitude=latitude,
@@ -146,6 +146,7 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
         hop_count=hop_count,
         received_at=received_at,
     );
+    grant(signal, level=ReadPerm);
     commit();
     return CloudRelayReceipt(
         success=True,
@@ -158,10 +159,12 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
 
 
 def _empty_disaster_cache -> DisasterCache {
-    return root ++> DisasterCache(
+    cache: DisasterCache = root.shared ++> DisasterCache(
         refreshed_at="No successful source refresh",
         source_status="unavailable",
     );
+    grant(cache, level=WritePerm);
+    return cache;
 }
 
 def _disaster_feed(cache: DisasterCache) -> DisasterFeedView {
@@ -207,8 +210,8 @@ def _remove_generated_legacy_events(cache: DisasterCache) -> bool {
     return removed;
 }
 
-def:protect get_disaster_feed -> DisasterFeedView {
-    caches: list[DisasterCache] = [root -->[?:DisasterCache]];
+def:pub get_disaster_feed -> DisasterFeedView {
+    caches: list[DisasterCache] = [root.shared -->[?:DisasterCache]];
     cache: DisasterCache;
     if not caches {
         cache = _empty_disaster_cache();
@@ -232,8 +235,8 @@ def:protect get_disaster_feed -> DisasterFeedView {
     return _disaster_feed(cache);
 }
 
-def:protect refresh_disaster_feed -> DisasterFeedView {
-    caches: list[DisasterCache] = [root -->[?:DisasterCache]];
+def:pub refresh_disaster_feed -> DisasterFeedView {
+    caches: list[DisasterCache] = [root.shared -->[?:DisasterCache]];
     cache: DisasterCache = caches[0] if caches else _empty_disaster_cache();
     fresh_events: list[dict[str, str]] = [];
     successful_sources: int = 0;
@@ -323,6 +326,7 @@ def:protect refresh_disaster_feed -> DisasterFeedView {
                 detail_url=item["url"],
             );
             cache +>:DisasterCacheEvent():+> event;
+            grant(event, level=WritePerm);
         }
         cache.refreshed_at = "Latest successful USGS/NWS server refresh";
         cache.source_status = "partial" if failed_sources > 0 else "live";

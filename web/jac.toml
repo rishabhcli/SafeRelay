@@ -15,8 +15,6 @@ react = "^18.2.0"
 react-dom = "^18.2.0"
 react-router-dom = "^6.22.0"
 react-error-boundary = "^5.0.0"
-"@tanstack/react-form" = "^1.33.0"
-zod = "^4.3.6"
 
 [dependencies.npm.dev]
 vite = "^6.4.1"
@@ -41,18 +39,6 @@ theme_color = "#0a0d0f"
 
 [client.vite.define]
 "__MAPBOX_ACCESS_TOKEN__" = "${MAPBOX_ACCESS_TOKEN:-pk.eyJ1IjoicmlzaGFiaGNsaSIsImEiOiJjbW1wa2xyeHAwZXVsMm9xNmViNXM3cDBnIn0.ecutlr2fPR_icmDlGeTi7g}"
-
-[scale.jwt]
-secret = "${JWT_SECRET:?JWT_SECRET must be set before SafeRelay starts}"
-algorithm = "HS256"
-exp_delta_days = 1
-
-[scale.auth]
-password_hash_rounds = 12
-forgot_password_rate_per_hour = 3
-forgot_password_burst = 3
-send_verification_rate_per_hour = 5
-send_verification_burst = 5
 
 [scale.admin]
 enabled = false
@@ -85,7 +71,6 @@ mongodb_enabled = false
 redis_enabled = false
 
 [scale.secrets]
-JWT_SECRET = "${JWT_SECRET:?JWT_SECRET must be set before deployment}"
 PROMETHEUS_ADMIN_PASSWORD = "${PROMETHEUS_ADMIN_PASSWORD:?PROMETHEUS_ADMIN_PASSWORD must be set before deployment}"
 [test]
 directory = "saferelay"

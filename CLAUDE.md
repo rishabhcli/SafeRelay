@@ -23,8 +23,8 @@ TypeScript, Python, handwritten API routes, or a second persistence layer.** Mod
 work with Jac primitives instead:
 
 - **Graph nodes + edges + walkers** for topology and traversal.
-- **`def:protect` typed functions** for authenticated, client-callable RPC. Jac auth
-  maps each operator to a private persistent root graph; the graph *is* the database.
+- **`def:pub` typed functions** for anonymous, client-callable web and mobile RPC.
+  The shared public root graph is the database.
 - **LLM output** only when structured, and always with a deterministic Jac fallback
   so the app runs with no model provider configured — this applies both to `by llm()`
   (cloud) and to the mobile on-device Apple Foundation Models bridge
@@ -44,7 +44,6 @@ Before editing any `.jac` file, read the relevant compiler guide: `jac guide <na
 
 ### web/
 ```sh
-export JWT_SECRET="$(openssl rand -hex 32)"            # required to start
 export PROMETHEUS_ADMIN_PASSWORD="$(openssl rand -base64 32)"  # required to start
 jac install
 jac start --dev main.jac        # serves http://localhost:8000  (ops UI at /ops)
@@ -81,12 +80,12 @@ jac build --client mobile --platform ios       # needs full Xcode on macOS
 `MobileRelaySignal`), the typed view objects, and the domain logic that pulls live
 USGS earthquake and NWS severe-weather records over `urllib.request` with bounded
 timeouts. It never fabricates operational records — a failed refresh keeps the
-verified cache or reports unavailable. Protected RPCs are `get_disaster_feed` and
-`refresh_disaster_feed`; public entry points `cloud_relay_health` and
-`ingest_mobile_signal` accept relay reports from the mobile app. `main.jac`
-re-exports these as thin `def:pub`/`def:priv` wrappers and mounts the client via a
+verified cache or reports unavailable. Public RPCs are `get_disaster_feed`,
+`refresh_disaster_feed`, `cloud_relay_health`, and `ingest_mobile_signal`; the
+last endpoint accepts relay reports from the mobile app. `main.jac`
+re-exports these as thin `def:pub` wrappers and mounts the client via a
 `cl { ... }` block. Client UI lives in `saferelay/*.jac` (`AppShell` router,
-`LandingPage`, `LoginPage`, and `VerifiedCommandCenter` — the evidence monitor at
+`LandingPage`, and `VerifiedCommandCenter` — the evidence monitor at
 `/ops`). Evidence-boundary tests are `saferelay/store_test.jac`. The former drill
 engine (Incident/Alert/RelayHop topology, the `TraceRelay` walker, the `by llm()`
 briefing agent, and the 24-RPC console) has been removed.

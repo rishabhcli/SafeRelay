@@ -1,6 +1,6 @@
 """Evidence-scoped SafeRelay operations surface with no generated live state."""
 
-import from "@jac/runtime" { Link, jacLogout, navigate }
+import from "@jac/runtime" { Link }
 import from "react" { useEffect }
 import from "mapbox-gl" {
     Map as MapboxMap,
@@ -9,10 +9,10 @@ import from "mapbox-gl" {
 }
 import from "lucide-react" {
     Activity,
+    ArrowLeft,
     Cloud,
     Database,
     ExternalLink,
-    LogOut,
     Map as MapIcon,
     Radio,
     RefreshCw,
@@ -197,11 +197,6 @@ def:pub VerifiedCommandCenter -> JsxElement {
         refreshing = False;
     }
 
-    def handle_logout(_event: MouseEvent) {
-        jacLogout();
-        navigate("/login");
-    }
-
     feed: DisasterFeedView | None = disaster_feed;
     visible_notice: str = (
         ""
@@ -218,9 +213,9 @@ def:pub VerifiedCommandCenter -> JsxElement {
                 <span>OPERATIONS EVIDENCE</span>
                 <h1>Verified source monitor</h1>
             </div>
-            <button className="button button--outline" onClick={handle_logout}>
-                <LogOut size={15} /> Sign out
-            </button>
+            <Link to="/" className="button button--outline">
+                <ArrowLeft size={15} /> Overview
+            </Link>
         </header>
 
         <main className="verified-ops-main">

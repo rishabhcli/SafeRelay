@@ -7,8 +7,8 @@ This contract defines the active Jac web application's data boundaries.
 | Product behavior | Jac-native implementation | Verification |
 | --- | --- | --- |
 | Public map preview | `RelayPlayground` confines synthetic markers to a visibly labeled map-only layer | Browser: `/` |
-| Protected operations | Jac Scale auth and `AuthGuard` protect `/ops` and both source endpoints | Direct API and browser |
-| Per-operator source cache | Verified USGS/NWS records attach to the authenticated Jac root | Jac test and browser |
+| Public operations | `/ops` and both source endpoints are available without a Jac session | Direct API and browser |
+| Shared source cache | Verified USGS/NWS records attach to the public Jac root | Jac test and browser |
 | Active operations route | `VerifiedCommandCenter` shows source records and honest empty relay, receipt, responder, and outcome states | Browser: `/ops` |
 | USGS earthquakes | Server refresh reads the official all-day GeoJSON feed with a bounded timeout | Browser and server |
 | NWS severe weather | Server refresh reads active Severe/Extreme alerts with a bounded timeout | Browser and server |
@@ -30,6 +30,5 @@ Run the complete release gate with:
 jac x preflight
 ```
 
-Production promotion still depends on the Jac 0.34.7 runtime gates in
-`PRODUCTION.md`: server-side registration password enforcement and disabled
-documentation routes.
+Production promotion still depends on the disabled-documentation-route gate
+described in `PRODUCTION.md`.

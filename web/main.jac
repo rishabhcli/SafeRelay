@@ -39,11 +39,11 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
     );
 }
 
-def:priv get_disaster_feed -> DisasterFeedView {
+def:pub get_disaster_feed -> DisasterFeedView {
     return _get_disaster_feed();
 }
 
-def:priv refresh_disaster_feed -> DisasterFeedView {
+def:pub refresh_disaster_feed -> DisasterFeedView {
     return _refresh_disaster_feed();
 }
 

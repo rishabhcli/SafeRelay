@@ -11,8 +11,8 @@ This is the canonical SafeRelay repository and contains both product surfaces:
 
 - `mobile/` is the field relay for composing, validating, storing, and
   forwarding emergency packets.
-- `web/` is the authenticated operations console for public hazard monitoring
-  and evidence review.
+- `web/` is the public operations console for public hazard monitoring and
+  evidence review.
 
 Both applications are independent Jac projects. Native iOS code is limited to
 the platform bridges and entitlements that Capacitor cannot express directly.
@@ -38,9 +38,9 @@ clearly labeled map layers and are excluded from evidence counts.
 ## Built With Jac
 
 - Jac 0.34.7 for application logic, graph state, protocol policy, tests, and UI
-- Typed protected Jac functions for authenticated web RPC
+- Typed public Jac functions for anonymous web RPC
 - Typed public Jac ingestion for idempotent mobile cloud receipts
-- Per-operator Jac root graphs for isolated console state
+- Shared public Jac graph state for the console and mobile relay
 - Capacitor 8 for the native mobile shell
 - CoreBluetooth for the iOS central and peripheral bridge
 - Apple Foundation Models for the optional on-device Survival Guide
@@ -50,7 +50,6 @@ clearly labeled map layers and are excluded from evidence counts.
 
 ```sh
 cd web
-export JWT_SECRET="$(openssl rand -hex 32)"
 export PROMETHEUS_ADMIN_PASSWORD="$(openssl rand -base64 32)"
 export MAPBOX_ACCESS_TOKEN="<public Mapbox token>"
 jac install
@@ -91,7 +90,7 @@ advertising, background continuity, or phone-to-phone delivery.
 | Path | Responsibility |
 | --- | --- |
 | `mobile/` | Offline-first field relay, protocol, services, tests, and native shell |
-| `web/` | Public landing experience and authenticated operations console |
+| `web/` | Public landing experience and operations console |
 | `design/` | App icon source layers and export tooling |
 | `.github/workflows/` | Validation and web deployment automation |
 
