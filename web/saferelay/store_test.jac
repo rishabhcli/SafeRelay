@@ -7,6 +7,7 @@ import from .store {
     MobileRelaySignal,
     cloud_relay_health,
     get_disaster_feed,
+    get_mobile_signal_feed,
     ingest_mobile_signal,
 }
 
@@ -71,6 +72,40 @@ test "mobile signal ingestion is durable and idempotent" {
     assert duplicate.success;
     assert not duplicate.is_new;
     assert len([root -->][?:MobileRelaySignal]) == 1;
+}
+
+
+test "mobile signal feed exposes stored evidence newest first" {
+    _clear_mobile_signals();
+    first = ingest_mobile_signal(
+        "feed-older",
+        "phone-a",
+        37.8044,
+        -122.2712,
+        1,
+        1700000000,
+        -75,
+        "phone-b",
+        1,
+    );
+    second = ingest_mobile_signal(
+        "feed-newer",
+        "phone-c",
+        37.8050,
+        -122.2700,
+        2,
+        1700000010,
+        -68,
+        "phone-d",
+        2,
+    );
+    feed = get_mobile_signal_feed(1);
+
+    assert first.success and second.success;
+    assert feed.total == 2;
+    assert len(feed.signals) == 1;
+    assert feed.signals[0].message_id == "feed-newer";
+    assert feed.signals[0].evidence_state == "unverified-mobile-report";
 }
 
 

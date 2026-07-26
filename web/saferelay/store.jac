@@ -71,6 +71,28 @@ obj CloudRelayReceipt {
 }
 
 
+obj MobileRelaySignalView {
+    has message_id: str,
+        origin_device_id: str,
+        latitude: float,
+        longitude: float,
+        status_code: int,
+        packet_timestamp: int,
+        rssi: int,
+        delivered_by: str,
+        hop_count: int,
+        received_at: str,
+        evidence_state: str;
+}
+
+
+obj MobileRelayFeedView {
+    has checked_at: str,
+        total: int,
+        signals: list[MobileRelaySignalView];
+}
+
+
 def:pub cloud_relay_health -> dict[str, object] {
     return {
         "accepting": True,
@@ -154,6 +176,46 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
         message_id=message_id,
         received_at=received_at,
         message="Signal stored by the Jac cloud relay.",
+    );
+}
+
+
+def _mobile_signal_sort_key(signal: MobileRelaySignal) -> str {
+    return signal.received_at;
+}
+
+
+def _mobile_signal_view(signal: MobileRelaySignal) -> MobileRelaySignalView {
+    return MobileRelaySignalView(
+        message_id=signal.message_id,
+        origin_device_id=signal.origin_device_id,
+        latitude=signal.latitude,
+        longitude=signal.longitude,
+        status_code=signal.status_code,
+        packet_timestamp=signal.packet_timestamp,
+        rssi=signal.rssi,
+        delivered_by=signal.delivered_by,
+        hop_count=signal.hop_count,
+        received_at=signal.received_at,
+        evidence_state=signal.evidence_state,
+    );
+}
+
+
+def:pub get_mobile_signal_feed(limit: int = 50) -> MobileRelayFeedView {
+    safe_limit: int = max(1, min(100, limit));
+    stored: list[MobileRelaySignal] = sorted(
+        [root.shared -->][?:MobileRelaySignal],
+        key=_mobile_signal_sort_key,
+        reverse=True,
+    );
+    return MobileRelayFeedView(
+        checked_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        total=len(stored),
+        signals=[
+            _mobile_signal_view(signal)
+            for signal in stored[:safe_limit]
+        ],
     );
 }
 

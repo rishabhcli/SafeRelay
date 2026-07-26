@@ -4,8 +4,10 @@ import from saferelay.store {
     CloudRelayReceipt,
     DisasterEventView,
     DisasterFeedView,
+    MobileRelayFeedView,
     cloud_relay_health as _cloud_relay_health,
     get_disaster_feed as _get_disaster_feed,
+    get_mobile_signal_feed as _get_mobile_signal_feed,
     ingest_mobile_signal as _ingest_mobile_signal,
     refresh_disaster_feed as _refresh_disaster_feed,
 }
@@ -38,6 +40,12 @@ def:pub ingest_mobile_signal(  # jac:ignore[W3030]
         hop_count,
     );
 }
+
+
+def:pub get_mobile_signal_feed(limit: int = 50) -> MobileRelayFeedView {
+    return _get_mobile_signal_feed(limit);
+}
+
 
 def:pub get_disaster_feed -> DisasterFeedView {
     return _get_disaster_feed();
