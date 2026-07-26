@@ -175,45 +175,45 @@ def:pub client_packet_to_bytes(packet: ClientSosPacket) -> list[int] {
 }
 
 
-def _client_u16(bytes: list[int], offset: int) -> int {
-    return bytes[offset] * 256 + bytes[offset + 1];
+def _client_u16(packet_bytes: list[int], offset: int) -> int {
+    return packet_bytes[offset] * 256 + packet_bytes[offset + 1];
 }
 
 
-def _client_u32(bytes: list[int], offset: int) -> int {
+def _client_u32(packet_bytes: list[int], offset: int) -> int {
     return (
-        bytes[offset] * 16777216
-        + bytes[offset + 1] * 65536
-        + bytes[offset + 2] * 256
-        + bytes[offset + 3]
+        packet_bytes[offset] * 16777216
+        + packet_bytes[offset + 1] * 65536
+        + packet_bytes[offset + 2] * 256
+        + packet_bytes[offset + 3]
     );
 }
 
 
-def _client_i32(bytes: list[int], offset: int) -> int {
-    value = _client_u32(bytes, offset);
+def _client_i32(packet_bytes: list[int], offset: int) -> int {
+    value = _client_u32(packet_bytes, offset);
     return value - 4294967296 if value >= 2147483648 else value;
 }
 
 
-def:pub client_packet_from_bytes(bytes: list[int], rssi: int = -127) -> ClientSosPacket {
-    if len(bytes) != CLIENT_LEGACY_PACKET_SIZE and len(bytes) != CLIENT_PACKET_SIZE {
+def:pub client_packet_from_bytes(packet_bytes: list[int], rssi: int = -127) -> ClientSosPacket {
+    if len(packet_bytes) != CLIENT_LEGACY_PACKET_SIZE and len(packet_bytes) != CLIENT_PACKET_SIZE {
         raise ValueError(
-            "Invalid packet size: " + str(len(bytes)) + ", expected 21 or 25"
+            "Invalid packet size: " + str(len(packet_bytes)) + ", expected 21 or 25"
         );
     }
-    if _client_u16(bytes, 0) != CLIENT_PACKET_HEADER {
+    if _client_u16(packet_bytes, 0) != CLIENT_PACKET_HEADER {
         raise ValueError("Invalid SafeRelay packet header");
     }
-    _client_validate_status(bytes[16]);
+    _client_validate_status(packet_bytes[16]);
     return ClientSosPacket(
-        user_id=_client_u32(bytes, 2),
-        sequence=_client_u16(bytes, 6),
-        latitude_e7=_client_i32(bytes, 8),
-        longitude_e7=_client_i32(bytes, 12),
-        status_code=bytes[16],
-        timestamp=_client_u32(bytes, 17),
-        target_id=_client_u32(bytes, 21) if len(bytes) == CLIENT_PACKET_SIZE else 0,
+        user_id=_client_u32(packet_bytes, 2),
+        sequence=_client_u16(packet_bytes, 6),
+        latitude_e7=_client_i32(packet_bytes, 8),
+        longitude_e7=_client_i32(packet_bytes, 12),
+        status_code=packet_bytes[16],
+        timestamp=_client_u32(packet_bytes, 17),
+        target_id=_client_u32(packet_bytes, 21) if len(packet_bytes) == CLIENT_PACKET_SIZE else 0,
         rssi=rssi
     );
 }
@@ -242,6 +242,20 @@ def:pub client_contains_packet(packets: list[ClientSosPacket], packet_id: str) -
         if packet.unique_id() == packet_id { return True; }
     }
     return False;
+}
+
+
+def:pub client_active_foreign_distress(
+    packets: list[ClientSosPacket],
+    local_user_id: int,
+    now_seconds: int
+) -> list[ClientSosPacket] {
+    return [
+        packet for packet in packets
+        if packet.user_id != local_user_id
+        and packet.status_code != 0
+        and not packet.is_expired(now_seconds)
+    ];
 }
 
 

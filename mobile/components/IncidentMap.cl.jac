@@ -5,12 +5,20 @@ import from "mapbox-gl" {
     LngLatBounds,
     Map as MapboxMap,
     Marker as MapboxMarker,
-    NavigationControl,
 }
-import from "lucide-react" { Crosshair, MapPin }
+import from "lucide-react" {
+    Crosshair,
+    LocateFixed,
+    LoaderCircle,
+    MapPin,
+    X,
+    ZoomIn,
+    ZoomOut,
+}
 import from ..domain.protocol {
     ClientSosPacket as SosPacket,
     client_status_color as status_color,
+    client_status_description as status_description,
     client_status_label as status_label,
 }
 
@@ -40,78 +48,106 @@ def:pub IncidentMap(
     latitude: float,
     longitude: float,
     location_ready: bool,
+    location_message: str,
+    on_locate: any,  # jac:ignore[W1037]
 ) -> JsxElement {
     has container_ref: Ref[HTMLDivElement] = Ref();
     has map_ref: Ref[any] = Ref(None);  # jac:ignore[W1037]
     has marker_refs: Ref[list[any]] = Ref([]);  # jac:ignore[W1037]
     has did_auto_center: Ref[bool] = Ref(False);
     has selected_packet_id: str = "";
+    has locating: bool = False;
 
     initial_center: list[float] = (
         [longitude, latitude] if location_ready else packet_center(packets)
     );
-    demo_signals: list[dict[str, any]] = [  # jac:ignore[W1037]
+    map_artifacts: list[dict[str, any]] = [  # jac:ignore[W1037]
         {
-            "id": "demo-rescue",
-            "label": "DEMO RESCUE",
+            "id": "map-artifact-rescue",
+            "label": "MAP ARTIFACT · RESCUE",
             "longitude": initial_center[0] - 0.008,
             "latitude": initial_center[1] + 0.004,
             "color": "#ff4d5e",
+            "description": "Unable to evacuate without assistance.",
+            "meta": "2 people / access blocked",
         },
         {
-            "id": "demo-medical",
-            "label": "DEMO MEDICAL",
+            "id": "map-artifact-medical",
+            "label": "MAP ARTIFACT · MEDICAL",
             "longitude": initial_center[0] + 0.006,
             "latitude": initial_center[1] + 0.007,
             "color": "#f2cc60",
+            "description": "Urgent first-aid support requested.",
+            "meta": "1 person / conscious",
         },
         {
-            "id": "demo-supplies",
-            "label": "DEMO SUPPLIES",
+            "id": "map-artifact-supplies",
+            "label": "MAP ARTIFACT · SUPPLIES",
             "longitude": initial_center[0] + 0.009,
             "latitude": initial_center[1] - 0.004,
             "color": "#49a8ff",
+            "description": "Water and essential supplies requested.",
+            "meta": "4 people / low water",
         },
         {
-            "id": "demo-safe",
-            "label": "DEMO SAFE",
+            "id": "map-artifact-safe",
+            "label": "MAP ARTIFACT · SAFE",
             "longitude": initial_center[0] - 0.004,
             "latitude": initial_center[1] - 0.007,
             "color": "#48c78e",
+            "description": "Occupants have reported themselves safe.",
+            "meta": "3 people / no assistance",
         },
     ];
     selected_packet_label: str = "";
     selected_packet_coordinates: str = "";
+    selected_packet_description: str = "";
+    selected_packet_source: str = "";
+    selected_packet_meta: str = "";
+    selected_packet_color: str = "#49a8ff";
     for packet in packets {
         if packet.unique_id() == selected_packet_id {
             selected_packet_label = status_label(packet.status_code);
             selected_packet_coordinates = (
                 f"{packet.latitude():.5f}, {packet.longitude():.5f}"
             );
+            selected_packet_description = status_description(packet.status_code);
+            selected_packet_source = "LOCAL MESH REPORT";
+            selected_packet_meta = (
+                (str(packet.rssi) + " dBm" if packet.rssi > -127 else "RSSI unknown")
+                + " / "
+                + str(packet.relay_hops)
+                + (" relay hop" if packet.relay_hops == 1 else " relay hops")
+            );
+            selected_packet_color = status_color(packet.status_code);
         }
     }
-    for demo_signal in demo_signals {
-        if str(demo_signal["id"]) == selected_packet_id {
-            selected_packet_label = str(demo_signal["label"]);
+    for map_artifact in map_artifacts {
+        if str(map_artifact["id"]) == selected_packet_id {
+            selected_packet_label = str(map_artifact["label"]);
             selected_packet_coordinates = (
-                f"{float(demo_signal['latitude']):.5f}, "
-                + f"{float(demo_signal['longitude']):.5f}"
+                f"{float(map_artifact['latitude']):.5f}, "
+                + f"{float(map_artifact['longitude']):.5f}"
             );
+            selected_packet_description = str(map_artifact["description"]);
+            selected_packet_source = "SYNTHETIC MAP ARTIFACT · NOT A REPORT";
+            selected_packet_meta = str(map_artifact["meta"]);
+            selected_packet_color = str(map_artifact["color"]);
         }
     }
 
     def center_map(_event: MouseEvent) {
         map_instance: any = map_ref.current;  # jac:ignore[W1037]
         if not map_instance { return; }
-        if len(packets) + len(demo_signals) > 1 {
+        if len(packets) + len(map_artifacts) > 1 {
             bounds: any = new(LngLatBounds);  # jac:ignore[W1037]
             for packet in packets {
                 bounds.extend([packet.longitude(), packet.latitude()]);
             }
-            for demo_signal in demo_signals {
+            for map_artifact in map_artifacts {
                 bounds.extend([
-                    float(demo_signal["longitude"]),
-                    float(demo_signal["latitude"]),
+                    float(map_artifact["longitude"]),
+                    float(map_artifact["latitude"]),
                 ]);
             }
             if location_ready {
@@ -129,6 +165,34 @@ def:pub IncidentMap(
                     else packet_center(packets)
                 ),
                 "zoom": 14.0,
+                "duration": 500,
+            });
+        }
+    }
+
+    def zoom_in(_event: MouseEvent) {
+        map_instance: any = map_ref.current;  # jac:ignore[W1037]
+        if map_instance {
+            map_instance.zoomIn({"duration": 260});
+        }
+    }
+
+    def zoom_out(_event: MouseEvent) {
+        map_instance: any = map_ref.current;  # jac:ignore[W1037]
+        if map_instance {
+            map_instance.zoomOut({"duration": 260});
+        }
+    }
+
+    async def locate_user(_event: MouseEvent) {
+        locating = True;
+        await on_locate();
+        locating = False;
+        map_instance: any = map_ref.current;  # jac:ignore[W1037]
+        if map_instance and location_ready {
+            map_instance.easeTo({
+                "center": [longitude, latitude],
+                "zoom": max(15.0, float(map_instance.getZoom())),
                 "duration": 500,
             });
         }
@@ -153,10 +217,6 @@ def:pub IncidentMap(
                     "touchPitch": False,
                     "cooperativeGestures": False,
                 },
-            );
-            map_instance.addControl(
-                new(NavigationControl, {"showCompass": False}),
-                "top-right",
             );
             map_ref.current = map_instance;
             return lambda {
@@ -221,9 +281,17 @@ def:pub IncidentMap(
                     "aria-label",
                     status_label(packet.status_code) + " packet " + packet_id,
                 );
+                marker_element.setAttribute(
+                    "aria-expanded",
+                    "true" if packet_id == selected_packet_id else "false",
+                );
                 marker_element.addEventListener(
                     "click",
-                    lambda (_event: any) { selected_packet_id = packet_id; },
+                    lambda (_event: any) {
+                        selected_packet_id = (
+                            "" if selected_packet_id == packet_id else packet_id
+                        );
+                    },
                 );
                 marker: any = new(  # jac:ignore[W1037]
                     MapboxMarker,
@@ -234,32 +302,40 @@ def:pub IncidentMap(
                 next_markers.append(marker);
             }
 
-            for demo_signal in demo_signals {
-                demo_id: str = str(demo_signal["id"]);
-                demo_label: str = str(demo_signal["label"]);
-                demo_element: any = _document.createElement("button");  # jac:ignore[W1037]
-                demo_element.type = "button";
-                demo_element.className = (
+            for map_artifact in map_artifacts {
+                artifact_id: str = str(map_artifact["id"]);
+                artifact_label: str = str(map_artifact["label"]);
+                artifact_element: any = _document.createElement("button");  # jac:ignore[W1037]
+                artifact_element.type = "button";
+                artifact_element.className = (
                     "field-map-marker is-demo is-selected"
-                    if demo_id == selected_packet_id
+                    if artifact_id == selected_packet_id
                     else "field-map-marker is-demo"
                 );
-                demo_element.style.backgroundColor = str(demo_signal["color"]);
-                demo_element.setAttribute("aria-label", demo_label);
-                demo_element.addEventListener(
+                artifact_element.style.backgroundColor = str(map_artifact["color"]);
+                artifact_element.setAttribute("aria-label", artifact_label);
+                artifact_element.setAttribute(
+                    "aria-expanded",
+                    "true" if artifact_id == selected_packet_id else "false",
+                );
+                artifact_element.addEventListener(
                     "click",
-                    lambda (_event: any) { selected_packet_id = demo_id; },
+                    lambda (_event: any) {
+                        selected_packet_id = (
+                            "" if selected_packet_id == artifact_id else artifact_id
+                        );
+                    },
                 );
-                demo_marker: any = new(  # jac:ignore[W1037]
+                artifact_marker: any = new(  # jac:ignore[W1037]
                     MapboxMarker,
-                    {"element": demo_element, "anchor": "center"},
+                    {"element": artifact_element, "anchor": "center"},
                 );
-                demo_marker.setLngLat([
-                    float(demo_signal["longitude"]),
-                    float(demo_signal["latitude"]),
+                artifact_marker.setLngLat([
+                    float(map_artifact["longitude"]),
+                    float(map_artifact["latitude"]),
                 ]);
-                demo_marker.addTo(map_instance);
-                next_markers.append(demo_marker);
+                artifact_marker.addTo(map_instance);
+                next_markers.append(artifact_marker);
             }
             marker_refs.current = next_markers;
             return lambda {
@@ -273,22 +349,67 @@ def:pub IncidentMap(
 
     return <section className="field-map mode-default" aria-label="Explorable incident map">
         <div ref={container_ref} className="field-map-canvas"></div>
-        <button
-            className="field-map-recenter"
-            title="Fit active signals"
-            aria-label="Fit active signals"
-            onClick={center_map}
-        >
-            <Crosshair size={18} />
-        </button>
+        <div className="field-map-artifact-note">
+            RINGED MARKERS: MAP ARTIFACTS · NOT REPORTS
+        </div>
+        <div className="field-map-controls" role="group" aria-label="Map controls">
+            <button title="Zoom in" aria-label="Zoom in" onClick={zoom_in}>
+                <ZoomIn size={20} />
+            </button>
+            <button title="Zoom out" aria-label="Zoom out" onClick={zoom_out}>
+                <ZoomOut size={20} />
+            </button>
+            <button
+                className={
+                    "is-locating"
+                    if locating
+                    else ("has-location" if location_ready else "")
+                }
+                title={location_message if not location_ready else "Center on my location"}
+                aria-label={
+                    "Locating current position"
+                    if locating
+                    else "Locate me"
+                }
+                aria-pressed={location_ready}
+                onClick={locate_user}
+                disabled={locating}
+            >
+                {<LoaderCircle className="field-map-control-spinner" size={20} /> if locating else <LocateFixed size={20} />}
+            </button>
+            <button title="Fit active signals" aria-label="Fit active signals" onClick={center_map}>
+                <Crosshair size={20} />
+            </button>
+        </div>
         {if selected_packet_label {
-            <div className="field-map-selection">
-                <MapPin size={16} />
-                <div>
-                    <strong>{selected_packet_label}</strong>
-                    <span>{selected_packet_coordinates}</span>
+            <aside className="field-map-selection" aria-label="Emergency details" aria-live="polite">
+                <div className="field-map-selection-handle"></div>
+                <div className="field-map-selection-header">
+                    <span
+                        className="field-map-selection-icon"
+                        style={{"backgroundColor": selected_packet_color}}
+                    >
+                        <MapPin size={17} />
+                    </span>
+                    <div>
+                        <span className="field-map-selection-source">{selected_packet_source}</span>
+                        <strong>{selected_packet_label}</strong>
+                    </div>
+                    <button
+                        className="field-map-selection-close"
+                        title="Collapse emergency details"
+                        aria-label="Collapse emergency details"
+                        onClick={lambda { selected_packet_id = ""; }}
+                    >
+                        <X size={18} />
+                    </button>
                 </div>
-            </div>
+                <p>{selected_packet_description}</p>
+                <div className="field-map-selection-meta">
+                    <span>{selected_packet_coordinates}</span>
+                    <span>{selected_packet_meta}</span>
+                </div>
+            </aside>
         }}
         {if not MAPBOX_ACCESS_TOKEN {
             <div className="field-map-unavailable">

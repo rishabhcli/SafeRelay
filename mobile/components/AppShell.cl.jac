@@ -1,41 +1,31 @@
 """SafeRelay mobile operator shell."""
 
 import from "react" { useEffect }
-import from "qrcode.react" { QRCodeSVG }
 import from "lucide-react" {
     Activity,
     BatteryMedium,
     Bell,
     Bluetooth,
     Check,
-    ChevronRight,
-    CircleCheck,
-    Cloud,
-    CloudOff,
+    ChevronDown,
     Compass,
     Copy,
     Database,
     Download,
     Flashlight,
-    Gauge,
     HeartPulse,
     Headphones,
     MessageCircle,
     Send,
     Sparkles,
-    ListChecks,
-    LocateFixed,
     LockKeyhole,
     Map as MapIcon,
     MapPin,
     PackageOpen,
     Play,
-    Printer,
-    QrCode,
     Radio,
     RefreshCw,
     ShieldCheck,
-    Share2,
     Siren,
     SlidersHorizontal,
     Smartphone,
@@ -43,40 +33,30 @@ import from "lucide-react" {
     UploadCloud,
     Trash2,
     TriangleAlert,
-    UserRound,
     Volume2,
-    WifiOff,
     Wrench
 }
 import from ..domain.protocol {
     ClientSosPacket as SosPacket,
+    client_active_foreign_distress as active_foreign_distress,
     client_contains_packet as contains_packet,
     client_create_packet as create_packet,
     client_evaluate_relay as evaluate_relay,
     client_packet_from_bytes as packet_from_bytes,
     client_packet_to_bytes as packet_to_bytes,
-    client_readiness_score as readiness_score,
     client_replace_packet as replace_packet,
     client_status_color as status_color,
     client_status_description as status_description,
     client_status_label as status_label
 }
 import from ..domain.operations {
-    ClientDrillReport,
     ClientOperationalReport,
+    ClientSurvivalChatMessage,
     client_assess_cloud_queue as assess_cloud_queue,
-    client_deterministic_drill as deterministic_drill,
-    client_evidence_board as evidence_board,
-    client_field_brief as field_brief,
-    client_handoff_export as handoff_export,
-    client_incident_report as incident_report,
-    client_reconcile_cloud as reconcile_cloud,
-    client_responder_needs as responder_needs,
-    client_trust_score as trust_score
+    client_field_brief as field_brief
 }
 import from ..services.field {
     cache_map_region,
-    fetch_disaster_events,
     start_ultrasonic_listener,
     stop_ultrasonic_listener,
     sync_relayed_packets,
@@ -89,13 +69,6 @@ import from ..services.foundation_models {
     chat_with_survival_guide,
     foundation_model_status,
 }
-import from ..services.handoff {
-    copy_handoff,
-    prepare_handoff,
-    print_handoff,
-    save_handoff,
-    share_handoff
-}
 import from ..services.mesh {
     NativeReadiness,
     clear_mesh_event_sink,
@@ -107,20 +80,21 @@ import from ..services.mesh {
     notify_incoming,
     publish_packet,
     register_app_state_observer,
+    register_notification_observers,
+    request_notification_permission,
     resume_saved_mesh,
     set_mesh_event_sink,
     set_torch,
     start_mesh,
     stop_mesh,
+    test_distress_notification,
     unix_seconds
 }
 import from ..services.storage {
-    ADJUDICATIONS_KEY,
     BATTERY_KEY,
     PRIVACY_KEY,
     SYNC_ATTEMPTS_KEY,
     SYNC_RECEIPTS_KEY,
-    append_record,
     clear_packets,
     clear_operational_history,
     clear_survival_chat_history,
@@ -136,21 +110,9 @@ import from ..services.storage {
     save_survival_chat_history,
     save_setting
 }
-import from ..domain.operations {
-    ClientSurvivalChatMessage
-}
 import from .IncidentMap { IncidentMap }
 
 glob _window: any = window;  # jac:ignore[W1037, W2001]
-
-
-def:pub Metric(label: str, value: str, detail: str) -> JsxElement {
-    return <div className="metric">
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{detail}</small>
-    </div>;
-}
 
 
 def:pub FactRow(
@@ -168,26 +130,48 @@ def:pub FactRow(
 
 
 def:pub PacketRow(packet: SosPacket, now: int) -> JsxElement {
+    has expanded: bool = False;
     age = max(0, packet.age_seconds(now));
     age_label = str(age) + "s ago" if age < 60 else str(age // 60) + "m ago";
-    return <article className="packet-row">
-        <span
-            className="packet-severity"
-            style={{"backgroundColor": status_color(packet.status_code)}}
-        ></span>
-        <div className="packet-main">
-            <div className="packet-heading">
-                <strong>{status_label(packet.status_code)}</strong>
-                <span>{"ID " + str(packet.user_id)[-6:]}</span>
+    detail_id = "packet-details-" + packet.unique_id();
+    return <article className={"packet-row expanded" if expanded else "packet-row"}>
+        <button
+            className="packet-row-trigger"
+            aria-expanded={expanded}
+            aria-controls={detail_id}
+            onClick={lambda { expanded = not expanded; }}
+        >
+            <span
+                className="packet-severity"
+                style={{"backgroundColor": status_color(packet.status_code)}}
+            ></span>
+            <div className="packet-main">
+                <div className="packet-heading">
+                    <strong>{status_label(packet.status_code)}</strong>
+                    <span>{"ID " + str(packet.user_id)[-6:]}</span>
+                </div>
+                <p>{status_description(packet.status_code)}</p>
+                <div className="packet-meta">
+                    <span>{age_label}</span>
+                    <span>{str(packet.rssi) + " dBm" if packet.rssi > -127 else "RSSI unknown"}</span>
+                    <span>{"seq " + str(packet.sequence)}</span>
+                </div>
             </div>
-            <p>{status_description(packet.status_code)}</p>
-            <div className="packet-meta">
-                <span>{age_label}</span>
-                <span>{str(packet.rssi) + " dBm" if packet.rssi > -127 else "RSSI unknown"}</span>
-                <span>{"seq " + str(packet.sequence)}</span>
+            <ChevronDown className="packet-disclosure" size={18} />
+        </button>
+        {if expanded {
+            <div id={detail_id} className="packet-expanded">
+                <div>
+                    <span>POSITION</span>
+                    <strong>{f"{packet.latitude():.5f}, {packet.longitude():.5f}"}</strong>
+                </div>
+                <div>
+                    <span>RELAY PATH</span>
+                    <strong>{str(packet.relay_hops) + (" hop" if packet.relay_hops == 1 else " hops")}</strong>
+                </div>
+                <p>Local packet evidence. Responder receipt and rescue outcome remain unknown.</p>
             </div>
-        </div>
-        <ChevronRight size={18} />
+        }}
     </article>;
 }
 
@@ -195,9 +179,8 @@ def:pub PacketRow(packet: SosPacket, now: int) -> JsxElement {
 def:pub AppShell -> JsxElement {
     has booting: bool = True;
     has onboarding_done: bool = False;
-    has active_tab: str = "command";
+    has active_tab: str = "home";
     has tools_view: str = "guide";
-    has systems_view: str = "radio";
     has user_id: int = 0;
     has packets: list[SosPacket] = [];
     has mesh_state: str = "idle";
@@ -207,6 +190,7 @@ def:pub AppShell -> JsxElement {
     has ble_permission: str = "unavailable";
     has notification_permission: str = "unavailable";
     has network_state: str = "unknown";
+    has background_state: str = "unknown";
     has location_ready: bool = False;
     has latitude: float = 0.0;
     has longitude: float = 0.0;
@@ -220,18 +204,11 @@ def:pub AppShell -> JsxElement {
     has alert_tone: str = "neutral";
     has busy: bool = False;
     has activity_log: list[str] = [];
-    has disaster_events: list[dict[str, object]] = [];
-    has disaster_source: str = "not loaded";
     has sync_attempts: list[dict[str, object]] = [];
     has sync_receipts: list[dict[str, object]] = [];
-    has adjudications: list[dict[str, object]] = [];
-    has handoff_artifact: any = None;  # jac:ignore[W1037]
-    has handoff_qr_open: bool = False;
     has sync_state: str = "idle";
     has internet_failures: int = 0;
     has offline_tiles: int = 0;
-    has drill_low_battery: bool = False;
-    has drill_congestion: bool = False;
     has ultrasonic_listening: bool = False;
     has ultrasonic_frequency: float = 0.0;
     has ultrasonic_energy: float = 0.0;
@@ -257,6 +234,7 @@ def:pub AppShell -> JsxElement {
         ble_permission = readiness.ble_permission;
         notification_permission = readiness.notification_permission;
         network_state = readiness.network_state;
+        background_state = readiness.background_state;
         plugin_version = readiness.plugin_version;
         if readiness.native {
             mesh_message = readiness.message;
@@ -342,6 +320,10 @@ def:pub AppShell -> JsxElement {
         kind = str(event["kind"]);
         message = str(event["message"]);
         append_log(message);
+        if kind == "notificationAction" {
+            active_tab = "map";
+            return;
+        }
         if kind != "packet" { return; }
 
         data = event["data"] as dict[str, object];
@@ -486,8 +468,28 @@ def:pub AppShell -> JsxElement {
     async def finish_onboarding {
         await complete_onboarding();
         onboarding_done = True;
-        alert_message = "Device setup saved. Start the mesh when you are ready.";
-        alert_tone = "success";
+        notification_state = await request_notification_permission();
+        notification_permission = notification_state.permission;
+        alert_message = (
+            "Device setup saved. Start the mesh when you are ready."
+            if notification_state.permission == "granted"
+            else notification_state.message
+        );
+        alert_tone = (
+            "success"
+            if notification_state.permission == "granted"
+            else "warning"
+        );
+    }
+
+    async def send_notification_test {
+        busy = True;
+        result = await test_distress_notification();
+        notification_permission = result.permission;
+        alert_message = result.message;
+        alert_tone = "success" if result.scheduled else "warning";
+        append_log(result.message);
+        busy = False;
     }
 
     async def erase_packet_history {
@@ -501,15 +503,13 @@ def:pub AppShell -> JsxElement {
         await clear_operational_history();
         sync_attempts = [];
         sync_receipts = [];
-        adjudications = [];
-        alert_message = "Local sync, receipt, and adjudication evidence cleared.";
+        alert_message = "Local sync history cleared from this device.";
         alert_tone = "neutral";
     }
 
     async def refresh_operational_ledgers {
         sync_attempts = await load_records(SYNC_ATTEMPTS_KEY);
         sync_receipts = await load_records(SYNC_RECEIPTS_KEY);
-        adjudications = await load_records(ADJUDICATIONS_KEY);
     }
 
     async def check_reachability {
@@ -529,20 +529,6 @@ def:pub AppShell -> JsxElement {
                 append_log("Automatic mesh start: " + result.message);
             }
         }
-    }
-
-    async def refresh_disasters {
-        busy = True;
-        result: any = await fetch_disaster_events(True);  # jac:ignore[W1037]
-        loaded_events = result["events"] as list[dict[str, object]];
-        loaded_source = str(result["source"]);
-        disaster_events = loaded_events;
-        disaster_source = loaded_source;
-        alert_message = (
-            str(len(loaded_events)) + " disaster notices loaded from " + loaded_source + " data."
-        );
-        alert_tone = "success" if len(loaded_events) > 0 else "warning";
-        busy = False;
     }
 
     async def download_local_map {
@@ -602,57 +588,6 @@ def:pub AppShell -> JsxElement {
         alert_message = str(result["message"]);
         alert_tone = "success" if sync_state == "succeeded" else "warning";
         append_log("Cloud sync " + sync_state + ": " + str(result["message"]));
-        busy = False;
-    }
-
-    async def record_adjudication(issue_id: str, decision: str) {
-        item = {
-            "issueId": issue_id,
-            "decision": decision,
-            "reviewer": "local operator",
-            "note": "Recorded from the Jac field console.",
-            "timestamp": unix_seconds(),
-            "localOnly": True
-        };
-        await append_record(ADJUDICATIONS_KEY, item);
-        adjudications = [item] + adjudications;
-        alert_message = "Local adjudication recorded: " + decision + ".";
-        alert_tone = "success";
-    }
-
-    async def run_handoff_action(
-        action: str,
-        current_handoff: dict[str, object]
-    ) {
-        busy = True;
-        artifact: any = await prepare_handoff(current_handoff);  # jac:ignore[W1037]
-        handoff_artifact = artifact;
-        if action == "qr" {
-            if str(artifact["qrPayload"]) {
-                handoff_qr_open = not handoff_qr_open;
-                alert_message = "Offline handoff QR prepared.";
-                alert_tone = "success";
-            } else {
-                handoff_qr_open = False;
-                alert_message = "This handoff exceeds the offline QR limit. Use file, share, or print transfer.";
-                alert_tone = "warning";
-            }
-            busy = False;
-            return;
-        }
-        result: any = (  # jac:ignore[W1037]
-            await copy_handoff(artifact) if action == "copy"
-            else (
-                await save_handoff(artifact) if action == "save"
-                else (
-                    await share_handoff(artifact) if action == "share"
-                    else await print_handoff(artifact)
-                )
-            )
-        );
-        alert_message = str(result["message"]);
-        alert_tone = "success" if bool(result["ok"]) else "warning";
-        append_log(str(result["message"]));
         busy = False;
     }
 
@@ -769,6 +704,7 @@ def:pub AppShell -> JsxElement {
         }
         await check_reachability();
         register_app_state_observer();
+        await register_notification_observers();
         booting = False;
     }
 
@@ -801,61 +737,45 @@ def:pub AppShell -> JsxElement {
 
     useEffect(lambda {
         reachability_timer = setInterval(lambda { check_reachability(); }, 60000);
-        disaster_timer = setInterval(lambda { fetch_disaster_events(); }, 1200000);
         return lambda {
             clearInterval(reachability_timer);
-            clearInterval(disaster_timer);
         };
     }, [mesh_state, platform_name]);
 
+    useEffect(lambda {
+        transcript: any = document.querySelector(".survival-transcript");  # jac:ignore[W1037]
+        if transcript {
+            transcript.scrollTop = transcript.scrollHeight;
+        }
+    }, [survival_chat, survival_sending, tools_view]);
+
+    useEffect(lambda {
+        window.scrollTo(0, 0);  # jac:ignore[W2001]
+    }, [active_tab]);
+
     now = unix_seconds();
-    readiness = readiness_score(
-        ble_permission == "granted",
-        location_ready,
-        notification_permission == "granted",
-        mesh_state == "active"
+    foreign_distress = active_foreign_distress(packets, user_id, now);
+    urgent_count = len(foreign_distress);
+    distress_age = (
+        max(0, foreign_distress[0].age_seconds(now))
+        if urgent_count > 0 else 0
     );
-    urgent_count = len([
-        packet for packet in packets
-        if packet.status_code != 0 and not packet.is_expired(now)
-    ]);
-    incident: dict[str, object] = incident_report(packets, now);
-    evidence: ClientOperationalReport = evidence_board(packets, now);
+    distress_age_label = (
+        str(distress_age) + "s ago"
+        if distress_age < 60
+        else str(distress_age // 60) + "m ago"
+    );
     brief: ClientOperationalReport = field_brief(
         packets,
         now,
         network_state != "offline",
         False
     );
-    needs: dict[str, object] = responder_needs(packets, now);
-    need_rows = needs["needs"] as list[dict[str, object]];
     queue = assess_cloud_queue(
         packets,
         network_state != "offline",
         privacy_mode,
         True
-    );
-    receipt_ids: list[str] = [
-        str(item["packetId"]) for item in sync_receipts
-        if bool(item["serverReceipted"])
-    ];
-    reconciliation: ClientOperationalReport = reconcile_cloud(
-        packets,
-        receipt_ids
-    );
-    handoff: dict[str, object] = handoff_export(packets, now, privacy_mode);
-    handoff_rows = handoff["reports"] as list[dict[str, object]];
-    trust: dict[str, object] = trust_score(
-        True,
-        True,
-        True,
-        len(packets) > 0,
-        False
-    );
-    drill: ClientDrillReport = deterministic_drill(
-        12,
-        drill_low_battery,
-        drill_congestion
     );
     if booting {
         return <main className="loading-screen">
@@ -923,6 +843,40 @@ def:pub AppShell -> JsxElement {
             </div>
         </header>
 
+        {if urgent_count > 0 {
+            <section
+                className="distress-presence"
+                role="alert"
+                aria-live="assertive"
+                aria-atomic="true"
+            >
+                <span className="distress-presence-icon">
+                    <Siren size={25} />
+                </span>
+                <div className="distress-presence-copy">
+                    <span>SOMEONE ELSE NEEDS HELP</span>
+                    <strong>
+                        {status_label(foreign_distress[0].status_code)}
+                        {" · " + status_description(foreign_distress[0].status_code)}
+                    </strong>
+                    <small>
+                        {"Node " + str(foreign_distress[0].user_id)[-6:]
+                        + " · " + distress_age_label
+                        + (" · 1 active report" if urgent_count == 1 else " · " + str(urgent_count) + " active reports")}
+                    </small>
+                </div>
+                <button
+                    className="distress-presence-action"
+                    onClick={lambda { active_tab = "map"; }}
+                    title="View distress reports on map"
+                    aria-label="View distress reports on map"
+                >
+                    <MapPin size={20} />
+                    <span>VIEW</span>
+                </button>
+            </section>
+        }}
+
         {if alert_message {
             <div key="runtime-alert" className={"alert-strip " + alert_tone}>
                 <TriangleAlert size={17} />
@@ -936,164 +890,72 @@ def:pub AppShell -> JsxElement {
         }}
 
         <main className="app-content">
-            {if active_tab == "command" {
-                <div key="command-panel" className="tab-panel">
-                <section className="page-heading">
-                    <div>
-                        <h1>Command</h1>
-                    </div>
-                    <button
-                        className="icon-button"
-                        title="Refresh readiness"
-                        aria-label="Refresh readiness"
-                        onClick={refresh_readiness}
-                    ><RefreshCw size={19} /></button>
-                </section>
-
-                <section className="readiness-band">
-                    <div className="readiness-score">
-                        <strong>{readiness}</strong>
-                        <span>/100</span>
-                    </div>
-                    <div>
-                        <span>FIELD READINESS</span>
-                        <h2>{"Ready to relay" if readiness >= 70 else "Setup incomplete"}</h2>
-                    </div>
-                    <button
-                        className={"mesh-toggle stop" if mesh_state == "active" else "mesh-toggle"}
-                        onClick={toggle_mesh}
-                        disabled={busy}
-                    >
-                        {<Square size={17} /> if mesh_state == "active" else <Play size={17} />}
-                        {"STOP MESH" if mesh_state == "active" else "START MESH"}
-                    </button>
-                </section>
-
-                <section className="metric-grid">
-                    <Metric label="ACTIVE REPORTS" value={str(urgent_count)} detail="unexpired local evidence" />
-                    <Metric label="RADIO QUEUE" value={str(len(packets))} detail="stored on this device" />
-                    <Metric label="PRIVACY" value={privacy_mode} detail="current forwarding policy" />
-                </section>
-
-                <section className="section-band">
-                    <div className="section-title">
+            {if active_tab == "home" {
+                <div key="home-panel" className="tab-panel home-panel">
+                    <section className="home-heading">
                         <div>
-                            <span>RECENT EVIDENCE</span>
-                            <h2>Nearby reports</h2>
+                            <span>FIELD RELAY</span>
+                            <h1>{"Mesh is active" if mesh_state == "active" else "Stay reachable"}</h1>
+                            <p>{mesh_message}</p>
                         </div>
-                        <Radio size={21} />
-                    </div>
-                    <div className="packet-list">
+                        <button
+                            className={"relay-power active" if mesh_state == "active" else "relay-power"}
+                            title={"Stop mesh relay" if mesh_state == "active" else "Start mesh relay"}
+                            aria-label={"Stop mesh relay" if mesh_state == "active" else "Start mesh relay"}
+                            onClick={toggle_mesh}
+                            disabled={busy}
+                        >
+                            {<Square size={23} /> if mesh_state == "active" else <Play size={23} />}
+                        </button>
+                    </section>
+
+                    <section className="home-status" aria-label="Field status">
+                        <button onClick={lambda { active_tab = "map"; }}>
+                            <span>NEARBY</span>
+                            <strong>{str(urgent_count)}</strong>
+                            <small>{"active report" if urgent_count == 1 else "active reports"}</small>
+                        </button>
+                        <button onClick={refresh_location}>
+                            <span>POSITION</span>
+                            <strong>{"READY" if location_ready else "OFF"}</strong>
+                            <small>{f"±{location_accuracy:.0f} m" if location_ready else "tap to acquire"}</small>
+                        </button>
+                        <button onClick={lambda { active_tab = "settings"; }}>
+                            <span>NETWORK</span>
+                            <strong>{network_state.upper()}</strong>
+                            <small>{privacy_mode}</small>
+                        </button>
+                    </section>
+
+                    <section className="home-reports">
+                        <div className="section-title compact">
+                            <div><span>LOCAL RADIO</span><h2>Nearby reports</h2></div>
+                            <Radio size={20} />
+                        </div>
                         {if len(packets) == 0 {
-                            <div key="empty-packets" className="empty-state">
-                                <Radio size={28} />
-                                <strong>No reports yet</strong>
+                            <div key="empty-packets" className="home-empty">
+                                <Radio size={25} />
+                                <div><strong>No nearby reports</strong><span>Listening continues while the mesh is active.</span></div>
+                            </div>
+                        } else {
+                            <div className="packet-list">
+                                {for packet in packets[:3] {
+                                    <PacketRow key={packet.unique_id()} packet={packet} now={now} />
+                                }}
                             </div>
                         }}
-                        {for packet in packets[:6] {
-                            <PacketRow key={packet.unique_id()} packet={packet} now={now} />
-                        }}
-                    </div>
-                </section>
+                    </section>
 
-                <section className="section-band">
-                    <div className="section-title">
-                        <div><span>INCIDENT SUMMARY</span><h2>Evidence board</h2></div>
-                        <ListChecks size={21} />
-                    </div>
-                    <div className="metric-grid compact-metrics">
-                        <Metric label="ACTIVE" value={str(incident["active"])} detail="current help reports" />
-                        <Metric label="STALE" value={str(incident["stale"])} detail="needs confirmation" />
-                        <Metric label="CONFLICTS" value={str(incident["conflicts"])} detail="human review" />
-                    </div>
-                    {for fact in evidence.facts {
-                        <div key={fact} className="evidence-line"><Check size={16} /><span>{fact}</span></div>
-                    }}
-                    {for warning in evidence.warnings {
-                        <div key={warning} className="evidence-line warning"><TriangleAlert size={16} /><span>{warning}</span></div>
-                    }}
-                    {for unknown in evidence.unknowns {
-                        <div key={unknown} className="evidence-line unknown"><ShieldCheck size={16} /><span>{unknown}</span></div>
-                    }}
-                </section>
-
-                <section className="section-band">
-                    <div className="section-title">
-                        <div><span>RESPONDER NEEDS</span><h2>Priority board</h2></div>
-                        <HeartPulse size={21} />
-                    </div>
-                    {for item in need_rows {
-                        <div key={str(item["category"])} className="need-row">
-                            <span>{str(item["category"])}</span>
-                            <strong>{str(item["count"])}</strong>
-                            <small>{"P" + str(item["priority"])}</small>
-                        </div>
-                    }}
-                    <div className="brief-box">
-                        <strong>{brief.title}</strong>
-                        {for fact in brief.facts { <p key={fact}>{fact}</p> }}
-                        {for warning in brief.warnings { <p key={warning} className="warning-copy">{warning}</p> }}
-                    </div>
-                </section>
-
-                <section className="section-band">
-                    <div className="section-title">
-                        <div><span>RESPONDER HANDOFF</span><h2>Privacy-aware export</h2></div>
-                        <UploadCloud size={21} />
-                    </div>
-                    <FactRow icon={<Database size={18} />} label="Rows ready" value={str(len(handoff_rows))} />
-                    <FactRow icon={<LockKeyhole size={18} />} label="Privacy mode" value={privacy_mode} />
-                    <FactRow icon={<ShieldCheck size={18} />} label="Outcome proof" value="Unknown" tone="warning" />
-                    <div className="handoff-actions">
-                        <button title="Copy JSON" aria-label="Copy responder handoff JSON" onClick={lambda { run_handoff_action("copy", handoff); }} disabled={busy}><Copy size={17} /></button>
-                        <button title="Save files" aria-label="Save responder handoff files" onClick={lambda { run_handoff_action("save", handoff); }} disabled={busy}><Download size={17} /></button>
-                        <button title="Share files" aria-label="Share responder handoff files" onClick={lambda { run_handoff_action("share", handoff); }} disabled={busy}><Share2 size={17} /></button>
-                        <button title="Print PDF" aria-label="Print responder handoff PDF" onClick={lambda { run_handoff_action("print", handoff); }} disabled={busy}><Printer size={17} /></button>
-                        <button title="Show offline QR" aria-label="Show responder handoff QR" onClick={lambda { run_handoff_action("qr", handoff); }} disabled={busy}><QrCode size={17} /></button>
-                    </div>
-                    {if handoff_qr_open and handoff_artifact is not None and str(handoff_artifact["qrPayload"]) {
-                        <div key="handoff-qr" className="handoff-qr">
-                            <QRCodeSVG
-                                value={str(handoff_artifact["qrPayload"])}
-                                size={220}
-                                level="M"
-                                bgColor="#ffffff"
-                                fgColor="#080d12"
-                            />
-                            <strong>OFFLINE HANDOFF QR</strong>
-                            <small>{"SHA-256 " + str(handoff_artifact["sha256"])}</small>
-                            <p>Scanning transfers local evidence only. It does not prove responder receipt.</p>
-                        </div>
-                    }}
-                    <button className="secondary-command" onClick={lambda { record_adjudication("incident-" + str(now), "keep"); }}>
-                        <Check size={17} /> RECORD LOCAL REVIEW
-                    </button>
-                    <small className="boundary-copy">{str(handoff["boundary"])}</small>
-                </section>
-
-                <section className="section-band">
-                    <div className="section-title">
-                        <div><span>DETERMINISTIC SCENARIO</span><h2>{drill.scenario}</h2></div>
-                        <Gauge size={21} />
-                    </div>
-                    <div className="setting-row-inline">
-                        <label><input type="checkbox" checked={drill_low_battery} onChange={lambda (event: ChangeEvent) { drill_low_battery = event.target.checked; }} /> LOW BATTERY</label>
-                        <label><input type="checkbox" checked={drill_congestion} onChange={lambda (event: ChangeEvent) { drill_congestion = event.target.checked; }} /> CONGESTION</label>
-                    </div>
-                    <div className="metric-grid compact-metrics">
-                        <Metric label="DELIVERED" value={str(drill.delivered)} detail="simulated packets" />
-                        <Metric label="DEFERRED" value={str(drill.deferred)} detail="battery policy" />
-                        <Metric label="DROPPED" value={str(drill.dropped)} detail="congestion" />
-                    </div>
-                    <div className="drill-events">
-                        {for item in drill.events[:8] {
-                            <div key={item} className="log-line"><span>SIM</span><p>{item}</p></div>
-                        }}
-                    </div>
-                    <div className="proof-boundary compact">
-                        <ShieldCheck size={18} /><p>{drill.proof_boundary}</p>
-                    </div>
-                </section>
+                    <section className="home-shortcuts" aria-label="Quick actions">
+                        <button onClick={lambda { active_tab = "map"; }}>
+                            <MapIcon size={21} />
+                            <span><strong>Open map</strong><small>Reports and your position</small></span>
+                        </button>
+                        <button onClick={lambda { active_tab = "tools"; }}>
+                            <Wrench size={21} />
+                            <span><strong>Field tools</strong><small>Guide, compass, beacon</small></span>
+                        </button>
+                    </section>
                 </div>
             }}
 
@@ -1104,6 +966,8 @@ def:pub AppShell -> JsxElement {
                         latitude={latitude}
                         longitude={longitude}
                         location_ready={location_ready}
+                        location_message={location_message}
+                        on_locate={refresh_location}
                     />
                 </div>
             }}
@@ -1116,10 +980,10 @@ def:pub AppShell -> JsxElement {
                 </section>
 
                 <div className="mode-switch four field-tools-switch" role="tablist" aria-label="Field tool">
-                    <button id="tool-guide" className={"active" if tools_view == "guide" else ""} onClick={lambda { tools_view = "guide"; }}>GUIDE</button>
-                    <button id="tool-compass" className={"active" if tools_view == "compass" else ""} onClick={enable_compass}>COMPASS</button>
-                    <button id="tool-beacon" className={"active" if tools_view == "strobe" else ""} onClick={lambda { tools_view = "strobe"; }}>BEACON</button>
-                    <button id="tool-sonic" className={"active" if tools_view == "ultrasonic" else ""} onClick={lambda { tools_view = "ultrasonic"; }}>SONIC</button>
+                    <button id="tool-guide" role="tab" aria-selected={tools_view == "guide"} className={"active" if tools_view == "guide" else ""} onClick={lambda { tools_view = "guide"; }}>GUIDE</button>
+                    <button id="tool-compass" role="tab" aria-selected={tools_view == "compass"} className={"active" if tools_view == "compass" else ""} onClick={enable_compass}>COMPASS</button>
+                    <button id="tool-beacon" role="tab" aria-selected={tools_view == "strobe"} className={"active" if tools_view == "strobe" else ""} onClick={lambda { tools_view = "strobe"; }}>BEACON</button>
+                    <button id="tool-sonic" role="tab" aria-selected={tools_view == "ultrasonic"} className={"active" if tools_view == "ultrasonic" else ""} onClick={lambda { tools_view = "ultrasonic"; }}>SONIC</button>
                 </div>
 
                 <section className="tool-band mode-panel mode-compass detail-tool">
@@ -1229,7 +1093,7 @@ def:pub AppShell -> JsxElement {
                             placeholder="Message Survival Guide"
                             onChange={lambda (event: ChangeEvent) { survival_input = event.target.value; }}
                         ></textarea>
-                        <button className="survival-send" title="Send message" aria-label="Send message" onClick={lambda { send_survival_message(evidence.facts + evidence.warnings + evidence.unknowns); }} disabled={survival_sending or not survival_input.strip()}>
+                        <button className="survival-send" title="Send message" aria-label="Send message" onClick={lambda { send_survival_message(brief.facts + brief.warnings + brief.unknowns); }} disabled={survival_sending or not survival_input.strip()}>
                             <Send size={19} />
                         </button>
                     </div>
@@ -1242,6 +1106,58 @@ def:pub AppShell -> JsxElement {
                 <section className="page-heading distress-heading">
                     <div><h1>Distress</h1></div>
                     <Siren size={24} />
+                </section>
+
+                <section
+                    className={"status-selector sos-type-switch status-" + str(selected_status)}
+                    role="radiogroup"
+                    aria-label="Emergency type"
+                    aria-orientation="horizontal"
+                >
+                    <button
+                        id="sos-rescue"
+                        className={"critical selected" if selected_status == 1 else "critical"}
+                        role="radio"
+                        aria-checked={selected_status == 1}
+                        aria-label="Rescue, immediate danger"
+                        onClick={lambda { selected_status = 1; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><Siren size={21} /></span>
+                        <strong>RESCUE</strong>
+                    </button>
+                    <button
+                        id="sos-medical"
+                        className={"medical selected" if selected_status == 2 else "medical"}
+                        role="radio"
+                        aria-checked={selected_status == 2}
+                        aria-label="Medical, urgent care"
+                        onClick={lambda { selected_status = 2; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><HeartPulse size={21} /></span>
+                        <strong>MEDICAL</strong>
+                    </button>
+                    <button
+                        id="sos-trapped"
+                        className={"trapped selected" if selected_status == 3 else "trapped"}
+                        role="radio"
+                        aria-checked={selected_status == 3}
+                        aria-label="Trapped, pinned or blocked"
+                        onClick={lambda { selected_status = 3; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><TriangleAlert size={21} /></span>
+                        <strong>TRAPPED</strong>
+                    </button>
+                    <button
+                        id="sos-supplies"
+                        className={"supplies selected" if selected_status == 4 else "supplies"}
+                        role="radio"
+                        aria-checked={selected_status == 4}
+                        aria-label="Supplies, water or food"
+                        onClick={lambda { selected_status = 4; distress_armed = False; }}
+                    >
+                        <span className="status-icon"><PackageOpen size={21} /></span>
+                        <strong>SUPPLIES</strong>
+                    </button>
                 </section>
 
                 <section className="location-lock">
@@ -1258,54 +1174,6 @@ def:pub AppShell -> JsxElement {
                     </button>
                 </section>
 
-                <section
-                    className={"status-selector status-" + str(selected_status)}
-                    role="radiogroup"
-                    aria-label="Emergency type"
-                    aria-orientation="horizontal"
-                >
-                    <button
-                        className={"critical selected" if selected_status == 1 else "critical"}
-                        role="radio"
-                        aria-checked={selected_status == 1}
-                        aria-label="Rescue, immediate danger"
-                        onClick={lambda { selected_status = 1; distress_armed = False; }}
-                    >
-                        <span className="status-icon"><Siren size={21} /></span>
-                        <strong>RESCUE</strong>
-                    </button>
-                    <button
-                        className={"medical selected" if selected_status == 2 else "medical"}
-                        role="radio"
-                        aria-checked={selected_status == 2}
-                        aria-label="Medical, urgent care"
-                        onClick={lambda { selected_status = 2; distress_armed = False; }}
-                    >
-                        <span className="status-icon"><HeartPulse size={21} /></span>
-                        <strong>MEDICAL</strong>
-                    </button>
-                    <button
-                        className={"trapped selected" if selected_status == 3 else "trapped"}
-                        role="radio"
-                        aria-checked={selected_status == 3}
-                        aria-label="Trapped, pinned or blocked"
-                        onClick={lambda { selected_status = 3; distress_armed = False; }}
-                    >
-                        <span className="status-icon"><TriangleAlert size={21} /></span>
-                        <strong>TRAPPED</strong>
-                    </button>
-                    <button
-                        className={"supplies selected" if selected_status == 4 else "supplies"}
-                        role="radio"
-                        aria-checked={selected_status == 4}
-                        aria-label="Supplies, water or food"
-                        onClick={lambda { selected_status = 4; distress_armed = False; }}
-                    >
-                        <span className="status-icon"><PackageOpen size={21} /></span>
-                        <strong>SUPPLIES</strong>
-                    </button>
-                </section>
-
                 <button
                     className={"distress-command armed" if distress_armed else "distress-command"}
                     onClick={send_selected_status}
@@ -1318,171 +1186,129 @@ def:pub AppShell -> JsxElement {
                     </span>
                 </button>
 
-                <section className="section-band">
-                    <div className="section-title">
-                        <div><span>PACKET EVIDENCE</span><h2>Broadcast lifecycle</h2></div>
-                        <Activity size={21} />
+                <section className="distress-state">
+                    <span className={"active" if mesh_state == "active" else ""}></span>
+                    <div>
+                        <strong>{"Radio ready" if mesh_state == "active" else "Radio is off"}</strong>
+                        <small>{"The packet will be stored locally and broadcast over the mesh." if mesh_state == "active" else "Start the mesh from Home before sending when possible."}</small>
                     </div>
-                    <div className="lifecycle-track">
-                        <div className={"complete" if len(packets) > 0 else ""}><span>1</span><strong>Stored</strong><small>durable local record</small></div>
-                        <div className={"complete" if mesh_state == "active" else ""}><span>2</span><strong>Radio live</strong><small>local bearer active</small></div>
-                        <div className={"complete" if len(sync_receipts) > 0 else ""}><span>3</span><strong>Cloud receipt</strong><small>durable server evidence</small></div>
-                        <div><span>4</span><strong>Responder</strong><small>not confirmed</small></div>
-                    </div>
-                    <FactRow icon={<Radio size={18} />} label="Local packets" value={str(len(packets))} />
-                    <FactRow icon={<Cloud size={18} />} label="Server receipts" value={str(len(sync_receipts))} tone={"safe" if len(sync_receipts) > 0 else "warning"} />
-                    <FactRow icon={<UserRound size={18} />} label="Responder acknowledgement" value="Unknown" tone="warning" />
-                    <FactRow icon={<CircleCheck size={18} />} label="Rescue outcome" value="Unknown" tone="warning" />
-                    <div className="proof-boundary compact">
-                        <ShieldCheck size={18} /><p>Each state is evidence-scoped. A later state is never inferred from an earlier one.</p>
-                    </div>
-                </section>
-
-                <section className="section-band">
-                    <div className="section-title">
-                        <div><span>LOCAL LEDGER</span><h2>Packet history</h2></div>
-                        <Database size={21} />
-                    </div>
-                    {if len(packets) == 0 {
-                        <div key="empty-history" className="empty-state">
-                            <Database size={26} /><strong>No packet history</strong><span>Created and relayed packets appear here.</span>
-                        </div>
-                    }}
-                    {for packet in packets {
-                        <PacketRow key={"history-" + packet.unique_id()} packet={packet} now={now} />
-                    }}
                 </section>
                 </div>
             }}
 
-            {if active_tab == "systems" {
-                <div key="systems-panel" className={"tab-panel systems-" + systems_view}>
+            {if active_tab == "settings" {
+                <div key="settings-panel" className="tab-panel settings-panel">
                 <section className="page-heading">
-                    <div><h1>Systems</h1></div>
+                    <div><h1>Settings</h1></div>
                     <SlidersHorizontal size={23} />
                 </section>
 
-                <div className="mode-switch four" role="tablist" aria-label="Systems view">
-                    <button className={"active" if systems_view == "radio" else ""} onClick={lambda { systems_view = "radio"; }}>RADIO</button>
-                    <button className={"active" if systems_view == "sync" else ""} onClick={lambda { systems_view = "sync"; }}>SYNC</button>
-                    <button className={"active" if systems_view == "proof" else ""} onClick={lambda { systems_view = "proof"; }}>PROOF</button>
-                    <button className={"active" if systems_view == "storage" else ""} onClick={lambda { systems_view = "storage"; }}>STORAGE</button>
-                </div>
-
-                <section className="section-band mode-default">
-                    <div className="section-title">
-                        <div><h2>Device</h2></div>
-                        <Smartphone size={21} />
+                <section className="settings-section">
+                    <div className="settings-section-title">
+                        <span>CONNECTIVITY</span>
                     </div>
-                    <FactRow icon={<Bluetooth size={18} />} label="BLE permission" value={ble_permission} tone={"safe" if ble_permission == "granted" else "warning"} />
-                    <FactRow icon={<Bell size={18} />} label="Notifications" value={notification_permission} tone={"safe" if notification_permission == "granted" else "warning"} />
-                    <FactRow icon={<Sparkles size={18} />} label="On-device AI" value={foundation_status.availability} tone={"safe" if foundation_status.available else "warning"} />
-                    <FactRow icon={<Activity size={18} />} label="Mesh" value={mesh_state} tone={"safe" if mesh_state == "active" else "warning"} />
-                </section>
-
-                <section className="setting-band mode-default">
-                    <div className="setting-copy">
-                        <LockKeyhole size={20} />
-                        <div><span>PRIVACY BRIDGE</span><strong>{privacy_mode}</strong></div>
+                    <div className="settings-row">
+                        <span className={"settings-icon safe" if mesh_state == "active" else "settings-icon"}><Radio size={19} /></span>
+                        <div><strong>Mesh relay</strong><small>{mesh_message}</small></div>
+                        <button className={"settings-toggle on" if mesh_state == "active" else "settings-toggle"} onClick={toggle_mesh} disabled={busy} aria-label={"Stop mesh relay" if mesh_state == "active" else "Start mesh relay"}><span></span></button>
                     </div>
-                    <div className="segmented-control">
-                        <button className={"active" if privacy_mode == "Local Only" else ""} onClick={lambda { choose_privacy("Local Only"); }}>LOCAL</button>
-                        <button className={"active" if privacy_mode == "Relay Only" else ""} onClick={lambda { choose_privacy("Relay Only"); }}>RELAY</button>
-                        <button className={"active" if privacy_mode == "Cloud Bridge" else ""} onClick={lambda { choose_privacy("Cloud Bridge"); }}>CLOUD</button>
-                    </div>
-                </section>
-
-                <section className="setting-band mode-default">
-                    <div className="setting-copy">
-                        <BatteryMedium size={20} />
-                        <div><span>BATTERY PROFILE</span><strong>{battery_mode}</strong></div>
-                    </div>
-                    <div className="segmented-control">
-                        <button className={"active" if battery_mode == "SOS Active" else ""} onClick={lambda { choose_battery("SOS Active"); }}>SOS</button>
-                        <button className={"active" if battery_mode == "Bridge" else ""} onClick={lambda { choose_battery("Bridge"); }}>BRIDGE</button>
-                        <button className={"active" if battery_mode == "Battery Saver" else ""} onClick={lambda { choose_battery("Battery Saver"); }}>SAVER</button>
-                    </div>
-                </section>
-
-                <section className="section-band mode-panel mode-sync">
-                    <div className="section-title">
-                        <div><span>PRIVACY-GATED BRIDGE</span><h2>Cloud sync</h2></div>
-                        <Cloud size={21} />
-                    </div>
-                    <div className="metric-grid compact-metrics">
-                        <Metric label="QUEUED" value={str(queue.queued)} detail="unsynced packets" />
-                        <Metric label="ELIGIBLE" value={str(queue.eligible)} detail="policy allows" />
-                        <Metric label="RECEIPTS" value={str(len(sync_receipts))} detail="local evidence" />
-                    </div>
-                    {for blocker in queue.blockers {
-                        <div key={blocker} className="evidence-line warning"><LockKeyhole size={16} /><span>{blocker}</span></div>
-                    }}
-                    <button className="secondary-command" onClick={run_cloud_sync} disabled={busy}>
-                        <UploadCloud size={17} /> {"SYNCING…" if busy and sync_state == "checking" else "SYNC RELAYED PACKETS"}
+                    <button className="settings-row settings-row-button" onClick={refresh_readiness}>
+                        <span className="settings-icon"><RefreshCw size={19} /></span>
+                        <div><strong>Refresh device status</strong><small>Bluetooth, notifications, and background refresh</small></div>
                     </button>
-                    <small className="boundary-copy">Originated distress packets remain local; cloud upload is limited to packets this device relayed, matching the original safety rule.</small>
                 </section>
 
-                <section className="section-band mode-panel mode-sync">
-                    <div className="section-title">
-                        <div><span>ATTEMPT LEDGER</span><h2>Recent sync evidence</h2></div>
-                        <Database size={21} />
+                <section className="settings-section">
+                    <div className="settings-section-title">
+                        <span>RELAY PREFERENCES</span>
                     </div>
-                    {if len(sync_attempts) == 0 {
-                        <p key="empty-sync-ledger" className="muted-copy">No cloud sync attempt has been recorded.</p>
-                    }}
-                    {for item in sync_attempts[:12] {
-                        <div key={str(item["attemptId"])} className="ledger-row">
-                            <span className={"ledger-state " + str(item["status"])}></span>
-                            <div><strong>{str(item["status"]).upper()}</strong><p>{str(item["message"])}</p></div>
-                            <small>{str(item["pending"]) + " queued"}</small>
+                    <div className="settings-choice">
+                        <div className="settings-choice-copy"><LockKeyhole size={19} /><div><strong>Privacy bridge</strong><small>{privacy_mode}</small></div></div>
+                        <div className="segmented-control glass-slider-three" role="radiogroup" aria-label="Privacy bridge">
+                            <button role="radio" aria-checked={privacy_mode == "Local Only"} className={"active" if privacy_mode == "Local Only" else ""} onClick={lambda { choose_privacy("Local Only"); }}>LOCAL</button>
+                            <button role="radio" aria-checked={privacy_mode == "Relay Only"} className={"active" if privacy_mode == "Relay Only" else ""} onClick={lambda { choose_privacy("Relay Only"); }}>RELAY</button>
+                            <button role="radio" aria-checked={privacy_mode == "Cloud Bridge"} className={"active" if privacy_mode == "Cloud Bridge" else ""} onClick={lambda { choose_privacy("Cloud Bridge"); }}>CLOUD</button>
                         </div>
-                    }}
-                </section>
-
-                <section className="section-band mode-panel mode-proof">
-                    <div className="section-title">
-                        <div><span>CONFORMANCE</span><h2>Verification state</h2></div>
-                        <ShieldCheck size={21} />
                     </div>
-                    <FactRow icon={<Check size={18} />} label="Jac client source" value="Build verified" tone="safe" />
-                    <FactRow icon={<Bluetooth size={18} />} label="Native BLE plugin" value={plugin_version} tone={"safe" if plugin_version != "unavailable" else "warning"} />
-                    <FactRow icon={<Gauge size={18} />} label="Trust score" value={str(trust["score"]) + "/100"} />
-                    <FactRow icon={<ShieldCheck size={18} />} label="Physical proof" value={"Captured" if bool(trust["physicalProof"]) else "Not captured"} tone="warning" />
-                    {for fact in reconciliation.facts {
-                        <div key={fact} className="evidence-line"><Check size={16} /><span>{fact}</span></div>
-                    }}
-                    {for warning in reconciliation.warnings {
-                        <div key={warning} className="evidence-line warning"><TriangleAlert size={16} /><span>{warning}</span></div>
-                    }}
-                    <div className="proof-boundary compact">
-                        <ShieldCheck size={18} /><p>{str(trust["unknown"])}</p>
+                    <div className="settings-choice">
+                        <div className="settings-choice-copy"><BatteryMedium size={19} /><div><strong>Battery profile</strong><small>{battery_mode}</small></div></div>
+                        <div className="segmented-control glass-slider-three" role="radiogroup" aria-label="Battery profile">
+                            <button role="radio" aria-checked={battery_mode == "SOS Active"} className={"active" if battery_mode == "SOS Active" else ""} onClick={lambda { choose_battery("SOS Active"); }}>SOS</button>
+                            <button role="radio" aria-checked={battery_mode == "Bridge"} className={"active" if battery_mode == "Bridge" else ""} onClick={lambda { choose_battery("Bridge"); }}>BRIDGE</button>
+                            <button role="radio" aria-checked={battery_mode == "Battery Saver"} className={"active" if battery_mode == "Battery Saver" else ""} onClick={lambda { choose_battery("Battery Saver"); }}>SAVER</button>
+                        </div>
                     </div>
                 </section>
 
-                <section className="section-band mode-panel mode-storage">
-                    <div className="section-title">
-                        <div><span>DEVICE-LOCAL DATA</span><h2>Retention</h2></div>
-                        <Database size={21} />
+                <section className="settings-section">
+                    <div className="settings-section-title">
+                        <span>OFFLINE DATA</span>
                     </div>
-                    <FactRow icon={<Radio size={18} />} label="Packet records" value={str(len(packets))} />
-                    <FactRow icon={<Cloud size={18} />} label="Sync attempts" value={str(len(sync_attempts))} />
-                    <FactRow icon={<Check size={18} />} label="Receipts" value={str(len(sync_receipts))} />
-                    <FactRow icon={<ListChecks size={18} />} label="Adjudications" value={str(len(adjudications))} />
-                    <button className="destructive-command" onClick={erase_packet_history}>
-                        <Trash2 size={18} /> CLEAR PACKET HISTORY
+                    <button className="settings-row settings-row-button" onClick={download_local_map} disabled={busy}>
+                        <span className="settings-icon"><Download size={19} /></span>
+                        <div><strong>Offline map</strong><small>{str(offline_tiles) + " tiles cached" if offline_tiles > 0 else "Download around your current position"}</small></div>
                     </button>
-                    <button className="destructive-command subdued" onClick={erase_operational_ledgers}>
-                        <Trash2 size={18} /> CLEAR OPERATIONAL LEDGERS
+                    <button className="settings-row settings-row-button" onClick={run_cloud_sync} disabled={busy}>
+                        <span className="settings-icon"><UploadCloud size={19} /></span>
+                        <div><strong>Sync relayed packets</strong><small>{str(queue.queued) + " queued · " + str(len(sync_receipts)) + " receipts"}</small></div>
                     </button>
+                </section>
+
+                <section className="settings-section">
+                    <div className="settings-section-title">
+                        <span>DEVICE</span>
+                    </div>
+                    <div className="settings-row settings-status-row">
+                        <span className="settings-icon"><Bluetooth size={19} /></span>
+                        <div><strong>Bluetooth</strong><small>{ble_permission}</small></div>
+                        <span className={"status-dot ready" if ble_permission == "granted" else "status-dot"}></span>
+                    </div>
+                    <div className="settings-row settings-status-row">
+                        <span className="settings-icon"><Bell size={19} /></span>
+                        <div><strong>Notifications</strong><small>{notification_permission}</small></div>
+                        <span className={"status-dot ready" if notification_permission == "granted" else "status-dot"}></span>
+                    </div>
+                    <button className="settings-row settings-row-button" onClick={send_notification_test} disabled={busy}>
+                        <span className="settings-icon"><Bell size={19} /></span>
+                        <div><strong>Test distress notification</strong><small>Banner, sound, and Notification Center</small></div>
+                    </button>
+                    <div className="settings-row settings-status-row">
+                        <span className="settings-icon"><Activity size={19} /></span>
+                        <div><strong>Background refresh</strong><small>{background_state}</small></div>
+                        <span className={"status-dot ready" if background_state == "available" else "status-dot"}></span>
+                    </div>
+                    <div className="settings-row settings-status-row">
+                        <span className="settings-icon"><Sparkles size={19} /></span>
+                        <div><strong>On-device guide</strong><small>{foundation_status.availability}</small></div>
+                        <span className={"status-dot ready" if foundation_status.available else "status-dot"}></span>
+                    </div>
+                </section>
+
+                <section className="settings-section">
+                    <div className="settings-section-title">
+                        <span>STORAGE</span>
+                    </div>
+                    <button className="settings-row settings-row-button destructive" onClick={erase_packet_history}>
+                        <span className="settings-icon"><Trash2 size={19} /></span>
+                        <div><strong>Clear packet history</strong><small>{str(len(packets)) + " records on this device"}</small></div>
+                    </button>
+                    <button className="settings-row settings-row-button destructive" onClick={erase_operational_ledgers}>
+                        <span className="settings-icon"><Database size={19} /></span>
+                        <div><strong>Clear sync history</strong><small>{str(len(sync_attempts) + len(sync_receipts)) + " local records"}</small></div>
+                    </button>
+                </section>
+
+                <section className="settings-about">
+                    <Smartphone size={18} />
+                    <span>{"SafeRelay · " + platform_name + " · " + plugin_version}</span>
                 </section>
                 </div>
             }}
         </main>
 
         <nav className="bottom-nav" aria-label="Primary">
-            <button id="nav-command" title="Command" aria-label="Command" className={"active" if active_tab == "command" else ""} onClick={lambda { active_tab = "command"; }}>
-                <Radio size={20} /><span>COMMAND</span>
+            <button id="nav-home" title="Home" aria-label="Home" className={"active" if active_tab == "home" else ""} onClick={lambda { active_tab = "home"; }}>
+                <Radio size={20} /><span>HOME</span>
             </button>
             <button id="nav-map" title="Map" aria-label="Map" className={"active" if active_tab == "map" else ""} onClick={lambda { active_tab = "map"; }}>
                 <MapIcon size={20} /><span>MAP</span>
@@ -1493,8 +1319,8 @@ def:pub AppShell -> JsxElement {
             <button id="nav-sos" title="Distress" aria-label="Distress" className={"active distress" if active_tab == "sos" else "distress"} onClick={lambda { active_tab = "sos"; }}>
                 <Siren size={21} /><span>DISTRESS</span>
             </button>
-            <button id="nav-systems" title="Systems" aria-label="Systems" className={"active" if active_tab == "systems" else ""} onClick={lambda { active_tab = "systems"; }}>
-                <SlidersHorizontal size={20} /><span>SYSTEMS</span>
+            <button id="nav-settings" title="Settings" aria-label="Settings" className={"active" if active_tab == "settings" else ""} onClick={lambda { active_tab = "settings"; }}>
+                <SlidersHorizontal size={20} /><span>SETTINGS</span>
             </button>
         </nav>
     </div>;

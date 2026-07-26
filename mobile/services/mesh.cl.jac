@@ -10,6 +10,7 @@ import from "@capawesome/capacitor-torch" { Torch }
 import from "@capgo/capacitor-bluetooth-low-energy" { BluetoothLowEnergy }
 
 glob BackgroundRelay: any = registerPlugin("SafeRelayBackground");  # jac:ignore[W1037]
+glob NativeMesh: any = registerPlugin("SafeRelayNativeMesh");  # jac:ignore[W1037]
 glob SERVICE_UUID: str = "12345678-1234-1234-1234-123456789ABC";
 glob PACKET_CHARACTERISTIC_UUID: str = "12345678-1234-1234-1234-123456789ABD";
 
@@ -17,10 +18,12 @@ glob _event_sink: any = None;  # jac:ignore[W1037]
 glob _mesh_running: bool = False;
 glob _mesh_starting: bool = False;
 glob _listeners_ready: bool = False;
+glob _notification_listeners_ready: bool = False;
 glob _current_packet_bytes: list[int] = [];
 glob _connecting_ids: list[str] = [];
 glob _connected_ids: list[str] = [];
 glob _retry_after: dict[str, int] = {};
+glob _pending_events: list[object] = [];
 
 
 obj:pub MeshStartState {
@@ -39,6 +42,7 @@ obj:pub NativeReadiness {
         bluetooth_state: str,
         notification_permission: str,
         network_state: str,
+        background_state: str,
         plugin_version: str,
         message: str;
 }
@@ -49,6 +53,13 @@ obj:pub LocationFix {
         latitude: float,
         longitude: float,
         accuracy: float,
+        message: str;
+}
+
+
+obj:pub NotificationDeliveryState {
+    has permission: str,
+        scheduled: bool,
         message: str;
 }
 
@@ -74,11 +85,15 @@ def:pub mesh_is_running -> bool {
 
 
 async def:pub resume_saved_mesh -> MeshStartState | None {
-    if not is_native() or native_platform() != "android" {
+    if not is_native() {
         return None;
     }
     try {
-        status = await BackgroundRelay.status();
+        status = (
+            await NativeMesh.status()
+            if native_platform() == "ios"
+            else await BackgroundRelay.status()
+        );
         if status.enabled {
             return await start_mesh();
         }
@@ -89,6 +104,11 @@ async def:pub resume_saved_mesh -> MeshStartState | None {
 
 def:pub set_mesh_event_sink(sink: any) {  # jac:ignore[W1037]
     _event_sink = sink;
+    buffered = _pending_events;
+    _pending_events = [];
+    for event in buffered {
+        sink.call(None, event);
+    }
 }
 
 
@@ -98,21 +118,24 @@ def:pub clear_mesh_event_sink {
 
 
 def _emit(kind: str, message: str, data: object | None = None) {
-    if not _event_sink { return; }
-    callback = _event_sink;
-    callback.call(None, {
+    event = {
         "kind": kind,
         "message": message,
         "data": data if data is not None else {}
-    });
+    };
+    if not _event_sink {
+        _pending_events = (_pending_events + [event])[-100:];
+        return;
+    }
+    _event_sink.call(None, event);
 }
 
 
-def _emit_packet(bytes: list[int], rssi: int, source: str) {
+def _emit_packet(packet_bytes: list[int], rssi: int, source: str) {
     _emit(
         "packet",
         "Received an SafeRelay packet over " + source,
-        {"bytes": bytes, "rssi": rssi, "source": source}
+        {"bytes": packet_bytes, "rssi": rssi, "source": source}
     );
 }
 
@@ -134,6 +157,7 @@ async def:pub inspect_native_readiness -> NativeReadiness {
             bluetooth_state="unavailable",
             notification_permission="unavailable",
             network_state="browser preview",
+            background_state="unavailable",
             plugin_version="unavailable",
             message="Native BLE is available only in the generated iOS or Android shell."
         );
@@ -143,15 +167,26 @@ async def:pub inspect_native_readiness -> NativeReadiness {
     bluetooth_state = "unknown";
     notification_permission = "prompt";
     network_state = "unknown";
+    background_state = "not reported";
     plugin_version = "unknown";
-    try {
-        permissions = await BluetoothLowEnergy.checkPermissions();
-        ble_permission = str(permissions.bluetooth);
-    } except Exception {}
-    try {
-        version = await BluetoothLowEnergy.getPluginVersion();
-        plugin_version = str(version.version);
-    } except Exception {}
+    if platform == "ios" {
+        try {
+            native_status = await NativeMesh.status();
+            ble_permission = str(native_status.bluetoothPermission);
+            bluetooth_state = str(native_status.bluetoothState);
+            background_state = str(native_status.backgroundRefresh);
+            plugin_version = str(native_status.version);
+        } except Exception {}
+    } else {
+        try {
+            permissions = await BluetoothLowEnergy.checkPermissions();
+            ble_permission = str(permissions.bluetooth);
+        } except Exception {}
+        try {
+            version = await BluetoothLowEnergy.getPluginVersion();
+            plugin_version = str(version.version);
+        } except Exception {}
+    }
     try {
         notification_status = await LocalNotifications.checkPermissions();
         notification_permission = str(notification_status.display);
@@ -170,6 +205,7 @@ async def:pub inspect_native_readiness -> NativeReadiness {
         bluetooth_state=bluetooth_state,
         notification_permission=notification_permission,
         network_state=network_state,
+        background_state=background_state,
         plugin_version=plugin_version,
         message="Native shell detected. Radio access still depends on OS permission and hardware state."
     );
@@ -293,6 +329,45 @@ def _register_listener_callbacks {
 }
 
 
+async def _start_native_ios -> MeshStartState {
+    if not _listeners_ready {
+        NativeMesh.addListener(
+            "packetReceived",
+            lambda (event: any) {
+                _emit_packet(
+                    event.bytes as list[int],
+                    int(event.rssi or -127),
+                    str(event.source or "native CoreBluetooth")
+                );
+            }
+        );
+        _listeners_ready = True;
+    }
+    result = await NativeMesh.start();
+    drained = await NativeMesh.drain();
+    for event in drained.packets {
+        _emit_packet(
+            event.bytes as list[int],
+            int(event.rssi or -127),
+            str(event.source or "restored CoreBluetooth event")
+        );
+    }
+    _mesh_running = bool(result.scanning and result.advertising);
+    state = "active" if _mesh_running else "starting";
+    return MeshStartState(
+        state=state,
+        message=(
+            "Native iOS scan, GATT relay, restoration, and receipt notifications are active."
+            if _mesh_running
+            else "Native iOS relay is waiting for Bluetooth to become ready."
+        ),
+        native=True,
+        platform="ios",
+        plugin_version=str(result.version)
+    );
+}
+
+
 async def:pub start_mesh -> MeshStartState {
     platform = native_platform();
     if not is_native() {
@@ -322,6 +397,9 @@ async def:pub start_mesh -> MeshStartState {
 
     _mesh_starting = True;
     try {
+        if platform == "ios" {
+            return await _start_native_ios();
+        }
         permission = await BluetoothLowEnergy.requestPermissions();
         if str(permission.bluetooth) != "granted" {
             return MeshStartState(
@@ -427,10 +505,15 @@ async def:pub stop_mesh -> MeshStartState {
         );
     }
 
-    try { await BluetoothLowEnergy.stopScan(); }
-    except Exception {}
-    try { await BluetoothLowEnergy.stopAdvertising(); }
-    except Exception {}
+    if platform == "ios" {
+        try { await NativeMesh.stop(); }
+        except Exception {}
+    } else {
+        try { await BluetoothLowEnergy.stopScan(); }
+        except Exception {}
+        try { await BluetoothLowEnergy.stopAdvertising(); }
+        except Exception {}
+    }
     if platform == "android" {
         try { await BackgroundRelay.stop(); }
         except Exception {}
@@ -439,7 +522,10 @@ async def:pub stop_mesh -> MeshStartState {
         try { await BluetoothLowEnergy.disconnect({"deviceId": device_id}); }
         except Exception {}
     }
-    try { await BluetoothLowEnergy.removeAllListeners(); }
+    try {
+        if platform == "ios" { await NativeMesh.removeAllListeners(); }
+        else { await BluetoothLowEnergy.removeAllListeners(); }
+    }
     except Exception {}
     _connected_ids = [];
     _connecting_ids = [];
@@ -455,20 +541,30 @@ async def:pub stop_mesh -> MeshStartState {
 }
 
 
-async def:pub publish_packet(bytes: list[int]) -> bool {
-    _current_packet_bytes = bytes;
+async def:pub publish_packet(packet_bytes: list[int]) -> bool {
+    _current_packet_bytes = packet_bytes;
     if not is_native() or not _mesh_running { return False; }
+
+    if native_platform() == "ios" {
+        try {
+            result = await NativeMesh.publish({"value": packet_bytes});
+            return bool(result.published);
+        } except Exception as error {
+            _emit("warning", "Packet queued locally; native publish failed: " + str(error));
+            return False;
+        }
+    }
 
     try {
         await BluetoothLowEnergy.setGattCharacteristicValue({
             "service": SERVICE_UUID,
             "characteristic": PACKET_CHARACTERISTIC_UUID,
-            "value": bytes
+            "value": packet_bytes
         });
         await BluetoothLowEnergy.notifyGattCharacteristicChanged({
             "service": SERVICE_UUID,
             "characteristic": PACKET_CHARACTERISTIC_UUID,
-            "value": bytes
+            "value": packet_bytes
         });
         for device_id in _connected_ids {
             try {
@@ -476,7 +572,7 @@ async def:pub publish_packet(bytes: list[int]) -> bool {
                     "deviceId": device_id,
                     "service": SERVICE_UUID,
                     "characteristic": PACKET_CHARACTERISTIC_UUID,
-                    "value": bytes,
+                    "value": packet_bytes,
                     "type": "withoutResponse"
                 });
             } except Exception {}
@@ -568,6 +664,8 @@ async def:pub notify_incoming(
     body: str
 ) {
     if not is_native() { return; }
+    # Native iOS receipt handling schedules the alert before the WebView wakes.
+    if native_platform() == "ios" { return; }
     try {
         await LocalNotifications.schedule({
             "notifications": [{
@@ -578,6 +676,94 @@ async def:pub notify_incoming(
             }]
         });
     } except Exception {}
+}
+
+
+async def:pub request_notification_permission -> NotificationDeliveryState {
+    if not is_native() {
+        return NotificationDeliveryState(
+            permission="unavailable",
+            scheduled=False,
+            message="Notification delivery requires the native app."
+        );
+    }
+    try {
+        status = await LocalNotifications.requestPermissions();
+        permission = str(status.display);
+        return NotificationDeliveryState(
+            permission=permission,
+            scheduled=False,
+            message=(
+                "Distress notifications are enabled."
+                if permission == "granted"
+                else "Distress notifications are blocked in device settings."
+            )
+        );
+    } except Exception as error {
+        return NotificationDeliveryState(
+            permission="error",
+            scheduled=False,
+            message="Notification permission check failed: " + str(error)
+        );
+    }
+}
+
+
+async def:pub test_distress_notification -> NotificationDeliveryState {
+    permission_state = await request_notification_permission();
+    if permission_state.permission != "granted" {
+        return permission_state;
+    }
+    scheduled = False;
+    try {
+        if native_platform() == "ios" {
+            result = await NativeMesh.testNotification();
+            scheduled = bool(result.scheduled);
+        } else {
+            await LocalNotifications.schedule({
+                "notifications": [{
+                    "id": 7302,
+                    "title": "SafeRelay alerts are working",
+                    "body": "This device can show incoming distress notifications.",
+                    "smallIcon": "ic_stat_safe_relay",
+                    "sound": "default",
+                    "extra": {"kind": "notification-test"}
+                }]
+            });
+            scheduled = True;
+        }
+        return NotificationDeliveryState(
+            permission="granted",
+            scheduled=scheduled,
+            message=(
+                "Test notification sent. A banner, sound, and Notification Center entry should appear."
+                if scheduled
+                else "The operating system did not schedule the test notification."
+            )
+        );
+    } except Exception as error {
+        return NotificationDeliveryState(
+            permission="granted",
+            scheduled=False,
+            message="Notification scheduling failed: " + str(error)
+        );
+    }
+}
+
+
+async def:pub register_notification_observers {
+    if not is_native() or _notification_listeners_ready { return; }
+    await LocalNotifications.addListener(
+        "localNotificationActionPerformed",
+        lambda (event: any) {  # jac:ignore[W1037]
+            _emit(
+                "notificationAction",
+                "Opened a SafeRelay notification",
+                {"actionId": str(event.actionId or "tap")}
+            );
+        }
+    );
+    _notification_listeners_ready = True;
 }
 
 

@@ -2,6 +2,7 @@
 
 import from domain.protocol {
     SosPacket,
+    active_foreign_distress,
     contains_packet,
     estimated_distance_meters,
     evaluate_relay,
@@ -135,6 +136,52 @@ test "safe packet stops distress propagation" {
     );
     assert result.decision == "drop";
     assert "SAFE" in result.reason;
+}
+
+
+test "active foreign distress excludes local safe and expired packets" {
+    now = 200000;
+    local = SosPacket(
+        user_id=42,
+        sequence=1,
+        latitude_e7=377749000,
+        longitude_e7=-1224194000,
+        status_code=1,
+        timestamp=now - 5
+    );
+    foreign = SosPacket(
+        user_id=84,
+        sequence=1,
+        latitude_e7=377749000,
+        longitude_e7=-1224194000,
+        status_code=2,
+        timestamp=now - 10
+    );
+    safe = SosPacket(
+        user_id=126,
+        sequence=1,
+        latitude_e7=377749000,
+        longitude_e7=-1224194000,
+        status_code=0,
+        timestamp=now - 10
+    );
+    expired = SosPacket(
+        user_id=168,
+        sequence=1,
+        latitude_e7=377749000,
+        longitude_e7=-1224194000,
+        status_code=3,
+        timestamp=now - 86401
+    );
+
+    active = active_foreign_distress(
+        [local, foreign, safe, expired],
+        42,
+        now
+    );
+
+    assert len(active) == 1;
+    assert active[0].unique_id() == foreign.unique_id();
 }
 
 

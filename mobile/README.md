@@ -5,9 +5,10 @@ packaged for iOS and Android with Jac's Capacitor mobile target.
 
 The first screen is the field application itself: device setup, command and
 evidence boards, local and disaster maps, offline tools, a guarded distress
-action, cloud receipt ledgers, responder handoff, drills, and native systems
+action, cloud receipt ledgers, responder handoff, and native systems
 diagnostics. The browser build is a truthful preview and does not simulate
-Bluetooth success.
+Bluetooth success. Synthetic records are confined to clearly labeled map
+artifacts; every non-map operational value is source-backed or shown as unknown.
 
 ## Stack
 
@@ -17,7 +18,7 @@ Bluetooth success.
 - App-owned Android `connectedDevice` foreground service
 - iOS `bluetooth-central` and `bluetooth-peripheral` background modes
 - Capacitor Preferences, Filesystem, Share, and native Printer plugins
-- Mapbox GL for the explorable live incident map
+- Mapbox GL for the explorable incident map
 - USGS, NOAA, GDACS, OpenStreetMap offline tiles, and the privacy-gated Supabase bridge
 
 The generated `android/` and `ios/` directories contain only the native bridge

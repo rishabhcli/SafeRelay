@@ -245,6 +245,20 @@ def:pub contains_packet(packets: list[SosPacket], packet_id: str) -> bool {
 }
 
 
+def:pub active_foreign_distress(
+    packets: list[SosPacket],
+    local_user_id: int,
+    now_seconds: int
+) -> list[SosPacket] {
+    return [
+        packet for packet in packets
+        if packet.user_id != local_user_id
+        and packet.status_code != 0
+        and not packet.is_expired(now_seconds)
+    ];
+}
+
+
 def:pub evaluate_relay(
     packet: SosPacket,
     now_seconds: int,

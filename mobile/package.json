@@ -18,8 +18,7 @@
     "@capacitor/share": "^8.0.1",
     "@capawesome/capacitor-torch": "^8.0.1",
     "@capgo/capacitor-bluetooth-low-energy": "^8.2.0",
-    "@capgo/capacitor-printer": "^8.1.1",
-    "qrcode.react": "^4.2.0"
+    "@capgo/capacitor-printer": "^8.1.1"
   },
   "devDependencies": {
     "@capacitor/assets": "^3.0.5",
