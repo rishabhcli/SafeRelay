@@ -1,0 +1,116 @@
+[project]
+name = "saferelay"
+version = "1.0.0"
+description = "Graph-native emergency mesh operations in Jac"
+entry-point = "main.jac"
+kind = "web-app"
+jac-version = "==0.34.7"
+license = "SEE LICENSE IN LICENSE"
+readme = "README.md"
+
+[dependencies]
+requests = ">=2.32,<3"
+
+[dependencies.npm]
+"lucide-react" = "^0.562.0"
+react = "^18.2.0"
+react-dom = "^18.2.0"
+react-router-dom = "^6.22.0"
+react-error-boundary = "^5.0.0"
+"@tanstack/react-form" = "^1.33.0"
+zod = "^4.3.6"
+
+[dependencies.npm.dev]
+vite = "^6.4.1"
+"@vitejs/plugin-react" = "4.7.0"
+typescript = "^5.3.3"
+"@types/react" = "^18.2.0"
+"@types/react-dom" = "^18.2.0"
+
+[dev-dependencies]
+watchdog = ">=3.0.0"
+
+[check]
+# Scenario construction is intentionally explicit so frozen run artifacts remain
+# readable and schema-stable across Jac releases.
+suppress = ["W3030"]
+
+[serve]
+port = 8000
+base_route_app = "app"
+
+[client.app_meta_data]
+title = "SafeRelay | Resilience Operations"
+description = "Graph-native emergency mesh operations and agentic drill command in Jac."
+keywords = "emergency mesh, incident command, Jac, graph operations, disaster drill"
+author = "SafeRelay Team"
+theme_color = "#0a0d0f"
+
+[byllm.model]
+default_model = "${BYLLM_DEFAULT_MODEL:-gpt-4o-mini}"
+
+[byllm.call_params]
+temperature = 0.2
+max_tokens = 900
+
+[scale.jwt]
+secret = "${JWT_SECRET:?JWT_SECRET must be set before SafeRelay starts}"
+algorithm = "HS256"
+exp_delta_days = 1
+
+[scale.auth]
+password_hash_rounds = 12
+forgot_password_rate_per_hour = 3
+forgot_password_burst = 3
+send_verification_rate_per_hour = 5
+send_verification_burst = 5
+
+[scale.admin]
+enabled = false
+
+[scale.server]
+docs_enabled = false
+suppress_health_check_logs = true
+
+[scale.monitoring]
+enabled = true
+namespace = "saferelay"
+walker_metrics = true
+prometheus_admin_password = "${PROMETHEUS_ADMIN_PASSWORD:?PROMETHEUS_ADMIN_PASSWORD must be set before SafeRelay starts}"
+
+[scale.microservices]
+enabled = false
+
+[scale.kubernetes]
+min_replicas = 1
+max_replicas = 1
+cpu_utilization_target = 70
+cpu_request = "250m"
+cpu_limit = "1000m"
+memory_request = "512Mi"
+memory_limit = "1Gi"
+health_check_path = "/healthz/live"
+ingress_limit_rps = 20
+ingress_limit_connections = 20
+mongodb_enabled = false
+redis_enabled = false
+
+[scale.secrets]
+JWT_SECRET = "${JWT_SECRET:?JWT_SECRET must be set before deployment}"
+PROMETHEUS_ADMIN_PASSWORD = "${PROMETHEUS_ADMIN_PASSWORD:?PROMETHEUS_ADMIN_PASSWORD must be set before deployment}"
+OPENAI_API_KEY = "${OPENAI_API_KEY:-}"
+ANTHROPIC_API_KEY = "${ANTHROPIC_API_KEY:-}"
+GOOGLE_API_KEY = "${GOOGLE_API_KEY:-}"
+
+[test]
+directory = "saferelay"
+filter = "store_test.jac"
+verbose = true
+
+[scripts]
+check = "jac check ."
+test = "jac test"
+build = "jac build main.jac"
+preflight = "jac check . && jac test && jac build main.jac"
+dev = "jac start --dev main.jac"
+serve = "jac start main.jac"
