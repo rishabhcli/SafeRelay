@@ -4,7 +4,10 @@ import from .store {
     DisasterCache,
     DisasterCacheEvent,
     DisasterEvent,
+    MobileRelaySignal,
+    cloud_relay_health,
     get_disaster_feed,
+    ingest_mobile_signal,
 }
 
 
@@ -18,6 +21,75 @@ def _clear_disaster_cache {
         del cache;
     }
     commit();
+}
+
+
+def _clear_mobile_signals {
+    for signal in [root -->][?:MobileRelaySignal] {
+        root del --> signal;
+        del signal;
+    }
+    commit();
+}
+
+
+test "cloud relay health declares its evidence boundary" {
+    health = cloud_relay_health();
+    assert health["accepting"];
+    assert health["service"] == "SafeRelay Jac cloud relay";
+    assert health["evidenceState"] == "unverified-mobile-report";
+}
+
+
+test "mobile signal ingestion is durable and idempotent" {
+    _clear_mobile_signals();
+    first = ingest_mobile_signal(
+        "00abc123_7",
+        "00abc123",
+        34.0522,
+        -118.2437,
+        2,
+        1785100000,
+        -64,
+        "00def456",
+        1,
+    );
+    duplicate = ingest_mobile_signal(
+        "00abc123_7",
+        "00abc123",
+        34.0522,
+        -118.2437,
+        2,
+        1785100000,
+        -64,
+        "00def456",
+        1,
+    );
+
+    assert first.success;
+    assert first.is_new;
+    assert duplicate.success;
+    assert not duplicate.is_new;
+    assert len([root -->][?:MobileRelaySignal]) == 1;
+}
+
+
+test "invalid mobile signals do not enter the cloud graph" {
+    _clear_mobile_signals();
+    receipt = ingest_mobile_signal(
+        "invalid",
+        "00abc123",
+        120.0,
+        -118.2437,
+        9,
+        1785100000,
+        -64,
+        "00def456",
+        1,
+    );
+
+    assert not receipt.success;
+    assert len([root -->][?:MobileRelaySignal]) == 0;
 }
 
 

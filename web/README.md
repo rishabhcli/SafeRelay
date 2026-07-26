@@ -31,6 +31,9 @@ SafeRelay uses Jac 0.34.7 as the full application runtime:
 - **Live public feeds:** USGS earthquake and NWS severe-weather refreshes run on
   the Jac server with bounded timeouts. Failed refreshes retain verified cached
   records or report unavailable; they never create continuity examples.
+- **Mobile cloud relay:** anonymous mobile clients can health-check and submit a
+  validated, idempotent signal to the shared Jac cloud graph. Each receipt is
+  evidence of server storage, not responder acknowledgement.
 
 ## Run It
 
@@ -62,14 +65,17 @@ jac test
 jac build main.jac
 ```
 
-The test suite verifies that unavailable sources return zero records and that
-legacy generated continuity records are purged. See [PARITY.md](./PARITY.md).
+The test suite verifies cloud health, validated idempotent mobile ingestion,
+honest empty source states, and legacy generated-record removal. See
+[PARITY.md](./PARITY.md).
 
 ## Architecture
 
 ```mermaid
 flowchart LR
     UI["Jac client components"] --> AUTH["Jac authentication"]
+    MOBILE["SafeRelay mobile"] --> RELAY["Public Jac signal ingestion"]
+    RELAY --> SHARED["Shared cloud signal graph"]
     AUTH --> RPC["Typed def:protect RPC"]
     RPC --> ROOT["Per-operator persistent root graph"]
     ROOT --> CACHE["Verified source cache"]
@@ -104,9 +110,11 @@ PARITY.md                    Old-to-Jac functional parity contract
 | `get_disaster_feed` | Read only cached USGS/NWS source records |
 | `refresh_disaster_feed` | Refresh USGS/NWS without generated fallback records |
 
-All surfaces in this table require a valid Jac session and run against that
-operator's root graph. See [PRODUCTION.md](./PRODUCTION.md) for the production
-configuration, environment contract, deployment sequence, and acceptance gates.
+Those two operator surfaces require a valid Jac session and run against that
+operator's root graph. `cloud_relay_health` and `ingest_mobile_signal` are
+public mobile endpoints; ingestion validates bounds, deduplicates by message
+ID, stores an unverified mobile report, and never claims responder action. See
+[PRODUCTION.md](./PRODUCTION.md) for deployment and acceptance gates.
 
 ## License
 

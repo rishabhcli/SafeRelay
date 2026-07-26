@@ -8,7 +8,8 @@ It does not require or perform a Git push.
 - Jac version: `0.34.7`, pinned by `jac.toml`.
 - Entry point: `main.jac`.
 - Application type: full-stack Jac web app.
-- Public surface: landing page and built-in user authentication.
+- Public surface: landing page, built-in user authentication, cloud relay
+  health, and validated idempotent mobile signal ingestion.
 - Protected surface: `/ops`, `get_disaster_feed`, and
   `refresh_disaster_feed`.
 - Persistence: one isolated root graph per authenticated operator containing
@@ -138,6 +139,10 @@ Verify against Preview, sandbox, and the final production URL:
 13. Synthetic artifacts appear only inside clearly labeled map layers.
 14. Complete the active-route checklist in `PARITY.md` at desktop and mobile
     widths.
+15. Anonymous `POST /function/cloud_relay_health` returns `accepting: true`.
+16. Repeating the same valid `POST /function/ingest_mobile_signal` returns one
+    new receipt followed by a duplicate receipt without storing a second node.
+17. Invalid status codes or coordinates return `success: false`.
 
 ## Operations
 

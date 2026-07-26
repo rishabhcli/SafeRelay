@@ -1,6 +1,7 @@
 """Persistent public-source hazard evidence for SafeRelay operations."""
 
 import json;
+import datetime;
 import urllib.request;
 
 
@@ -23,6 +24,21 @@ node DisasterEvent {
 edge DisasterCacheEvent: DisasterCache --> DisasterEvent {}
 
 
+node MobileRelaySignal {
+    has message_id: str,
+        origin_device_id: str,
+        latitude: float,
+        longitude: float,
+        status_code: int,
+        packet_timestamp: int,
+        rssi: int,
+        delivered_by: str,
+        hop_count: int,
+        received_at: str,
+        evidence_state: str = "unverified-mobile-report";
+}
+
+
 obj DisasterEventView {
     has disaster_id: str,
         source: str,
@@ -42,6 +58,102 @@ obj DisasterFeedView {
         weather_count: int,
         severe_count: int,
         events: list[DisasterEventView];
+}
+
+
+obj CloudRelayReceipt {
+    has success: bool,
+        is_new: bool,
+        message_id: str,
+        received_at: str,
+        message: str,
+        evidence_state: str = "unverified-mobile-report";
+}
+
+
+def:pub cloud_relay_health -> dict[str, object] {
+    return {
+        "accepting": True,
+        "service": "SafeRelay Jac cloud relay",
+        "evidenceState": "unverified-mobile-report",
+    };
+}
+
+
+def:pub ingest_mobile_signal(  # jac:ignore[W3030]
+    message_id: str,
+    origin_device_id: str,
+    latitude: float,
+    longitude: float,
+    status_code: int,
+    packet_timestamp: int,
+    rssi: int,
+    delivered_by: str,
+    hop_count: int,
+) -> CloudRelayReceipt {
+    received_at: str = datetime.datetime.now(datetime.timezone.utc).isoformat();
+    valid: bool = (
+        len(message_id) > 0
+        and len(message_id) <= 64
+        and len(origin_device_id) > 0
+        and len(origin_device_id) <= 64
+        and len(delivered_by) > 0
+        and len(delivered_by) <= 64
+        and latitude >= -90.0
+        and latitude <= 90.0
+        and longitude >= -180.0
+        and longitude <= 180.0
+        and status_code >= 0
+        and status_code <= 5
+        and packet_timestamp >= 0
+        and packet_timestamp <= 4294967295
+        and rssi >= -127
+        and rssi <= 20
+        and hop_count >= 0
+        and hop_count <= 8
+    );
+    if not valid {
+        return CloudRelayReceipt(
+            success=False,
+            is_new=False,
+            message_id=message_id[:64],
+            received_at=received_at,
+            message="Signal payload failed validation.",
+        );
+    }
+
+    for signal in [root -->][?:MobileRelaySignal] {
+        if signal.message_id == message_id {
+            return CloudRelayReceipt(
+                success=True,
+                is_new=False,
+                message_id=message_id,
+                received_at=signal.received_at,
+                message="Signal already stored.",
+            );
+        }
+    }
+
+    root ++> MobileRelaySignal(
+        message_id=message_id,
+        origin_device_id=origin_device_id,
+        latitude=latitude,
+        longitude=longitude,
+        status_code=status_code,
+        packet_timestamp=packet_timestamp,
+        rssi=rssi,
+        delivered_by=delivered_by,
+        hop_count=hop_count,
+        received_at=received_at,
+    );
+    commit();
+    return CloudRelayReceipt(
+        success=True,
+        is_new=True,
+        message_id=message_id,
+        received_at=received_at,
+        message="Signal stored by the Jac cloud relay.",
+    );
 }
 
 
