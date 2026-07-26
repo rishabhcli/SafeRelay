@@ -4661,15 +4661,21 @@ details textarea {
 
 .relay-node__icon {
   align-items: center;
-  background: #20272a;
-  border: 2px solid #4d595d;
+  background: #343d40;
+  border: 0;
+  box-shadow: 0 0 0 1px #59666a;
+  color: #d2d9d7;
   display: flex;
   height: 42px;
   justify-content: center;
   margin-bottom: 5px;
   position: relative;
-  transition: background 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
+  transition: background 260ms ease, box-shadow 260ms ease, color 260ms ease;
   width: 42px;
+}
+
+.relay-node__icon svg {
+  stroke-width: 2.4;
 }
 
 .relay-node strong {
@@ -4688,23 +4694,23 @@ details textarea {
 }
 
 .relay-node.is-reached .relay-node__icon {
-  background: #12333a;
-  border-color: var(--relay-cyan);
-  box-shadow: 5px 5px 0 rgba(57, 214, 235, 0.16);
-  color: var(--relay-cyan);
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.28);
+  color: #091012;
 }
 
-.relay-node.is-reached .relay-node__icon::before,
-.relay-node.is-reached .relay-node__icon::after {
-  animation: relay-node-ping 1.8s steps(4, end) infinite;
-  border: 1px solid rgba(57, 214, 235, 0.35);
-  content: "";
-  inset: -8px;
-  position: absolute;
+.relay-node--origin.is-reached .relay-node__icon {
+  background: #ff655e;
+  box-shadow: 4px 4px 0 rgba(255, 101, 94, 0.22);
 }
 
-.relay-node.is-reached .relay-node__icon::after {
-  animation-delay: 700ms;
+.relay-node--one.is-reached .relay-node__icon {
+  background: var(--relay-cyan);
+  box-shadow: 4px 4px 0 rgba(57, 214, 235, 0.2);
+}
+
+.relay-node--two.is-reached .relay-node__icon {
+  background: var(--relay-yellow);
+  box-shadow: 4px 4px 0 rgba(255, 212, 71, 0.2);
 }
 
 .relay-node--origin {
@@ -4728,10 +4734,9 @@ details textarea {
 }
 
 .relay-node--gateway.is-reached .relay-node__icon {
-  background: #3b3514;
-  border-color: var(--relay-yellow);
-  box-shadow: 5px 5px 0 rgba(255, 212, 71, 0.16);
-  color: var(--relay-yellow);
+  background: #7ee2a8;
+  box-shadow: 4px 4px 0 rgba(126, 226, 168, 0.2);
+  color: #091012;
 }
 
 .pip-runner {
@@ -5253,17 +5258,6 @@ details textarea {
 @keyframes relay-route-packet {
   to {
     left: 100%;
-  }
-}
-
-@keyframes relay-node-ping {
-  from {
-    opacity: 0.9;
-    transform: scale(0.75);
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.45);
   }
 }
 

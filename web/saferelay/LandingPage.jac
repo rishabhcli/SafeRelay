@@ -9,14 +9,15 @@ import from "lucide-react" {
     ChevronRight,
     CircleGauge,
     CloudLightning,
+    CloudUpload,
     Flame,
     LocateFixed,
     Map as MapIcon,
     Network,
-    Radio,
+    PhoneCall,
+    Repeat2,
     RotateCcw,
     Route,
-    Satellite,
     Send,
     ShieldCheck,
     Signal,
@@ -44,9 +45,9 @@ def:pub RelayPlayground -> JsxElement {
     action_label: str = "Inspect map artifact" if phase == 0 else (
         "Next map artifact" if phase < 3 else "Reset map layer"
     );
-    artifact_status: str = "Origin marker selected" if phase == 0 else (
-        "Nearby-phone marker selected" if phase == 1 else (
-            "Field-relay marker selected" if phase == 2 else "Gateway marker selected"
+    artifact_status: str = "SOS phone selected" if phase == 0 else (
+        "Nearby Bluetooth phone selected" if phase == 1 else (
+            "Store-and-forward relay selected" if phase == 2 else "Automatic cloud upload selected"
         )
     );
     pip_line: str = "Map layer only. No live evidence.";
@@ -122,24 +123,24 @@ def:pub RelayPlayground -> JsxElement {
             <div className={"relay-route relay-route--three is-reached" if phase >= 3 else "relay-route relay-route--three"}></div>
 
             <div className="relay-node relay-node--origin is-reached">
-                <span className="relay-node__icon"><Smartphone size={18} /></span>
-                <strong>ARTIFACT 01</strong>
-                <small>not a report</small>
+                <span className="relay-node__icon"><PhoneCall size={19} /></span>
+                <strong>SOS PHONE</strong>
+                <small>origin</small>
             </div>
             <div className={"relay-node relay-node--one is-reached" if phase >= 1 else "relay-node relay-node--one"}>
-                <span className="relay-node__icon"><Bluetooth size={18} /></span>
-                <strong>ARTIFACT 02</strong>
-                <small>not a report</small>
+                <span className="relay-node__icon"><Bluetooth size={19} /></span>
+                <strong>NEARBY</strong>
+                <small>Bluetooth phone</small>
             </div>
             <div className={"relay-node relay-node--two is-reached" if phase >= 2 else "relay-node relay-node--two"}>
-                <span className="relay-node__icon"><Radio size={18} /></span>
-                <strong>ARTIFACT 03</strong>
-                <small>not a report</small>
+                <span className="relay-node__icon"><Repeat2 size={19} /></span>
+                <strong>RELAY</strong>
+                <small>store + forward</small>
             </div>
             <div className={"relay-node relay-node--gateway is-reached" if phase >= 3 else "relay-node relay-node--gateway"}>
-                <span className="relay-node__icon"><Satellite size={18} /></span>
-                <strong>ARTIFACT 04</strong>
-                <small>not a report</small>
+                <span className="relay-node__icon"><CloudUpload size={19} /></span>
+                <strong>CLOUD</strong>
+                <small>auto upload</small>
             </div>
 
             <div className={"pip-runner pip-runner--" + str(phase)}>
@@ -192,7 +193,7 @@ def:pub LandingPage -> JsxElement {
             <section className="relay-source-strip" aria-label="Evidence boundaries">
                 <div><span>PUBLIC HAZARDS</span><strong>USGS + NWS</strong></div>
                 <div><span>RELAY REPORTS</span><strong>UNKNOWN UNTIL RECEIVED</strong></div>
-                <div><span>OPERATIONS</span><strong>PER-OPERATOR GRAPH</strong></div>
+                <div><span>OPERATIONS</span><strong>SHARED PUBLIC GRAPH</strong></div>
                 <div className="relay-source-strip__marquee" aria-hidden="true">
                     <span>MESSAGE MOVES · PATH STAYS · MESSAGE MOVES · PATH STAYS ·</span>
                 </div>
