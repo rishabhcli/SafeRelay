@@ -73,6 +73,7 @@ import from ..services.mesh {
     PacketPublishState,
     clear_mesh_event_sink,
     current_location,
+    dismiss_in_app_alert,
     emergency_haptic,
     inspect_native_readiness,
     mesh_is_running,
@@ -88,6 +89,7 @@ import from ..services.mesh {
     request_notification_permission,
     set_mesh_event_sink,
     set_torch,
+    start_in_app_alert,
     start_compass,
     start_mesh,
     stop_compass,
@@ -224,7 +226,9 @@ def:pub AppShell -> JsxElement {
     has alert_dismissing: bool = False;
     has alert_nonce: int = 0;
     has distress_notice_id: str = "";
-    has distress_notice_timer: Ref[any] = Ref(None);  # jac:ignore[W1037]
+    has distress_notice_status: int = 1;
+    has distress_notice_node: str = "TEST";
+    has distress_notice_timestamp: int = 0;
     has map_focus: dict[str, object] = {"packetId": "", "nonce": 0};
     has busy: bool = False;
     has activity_log: list[str] = [];
@@ -354,26 +358,25 @@ def:pub AppShell -> JsxElement {
         }, 220);
     }
 
-    def show_distress_notice(packet_id: str) {
-        if distress_notice_timer.current {
-            clearTimeout(distress_notice_timer.current);
-        }
+    async def show_distress_notice(
+        packet_id: str,
+        status_code: int,
+        node_label: str,
+        reported_at: int
+    ) {
         distress_notice_id = packet_id;
-        notice_id = packet_id;
-        distress_notice_timer.current = setTimeout(lambda {
-            if distress_notice_id == notice_id {
-                distress_notice_id = "";
-            }
-            distress_notice_timer.current = None;
-        }, 8000);
+        distress_notice_status = status_code;
+        distress_notice_node = node_label;
+        distress_notice_timestamp = reported_at;
+        await start_in_app_alert();
+    }
+
+    async def dismiss_distress_notice {
+        distress_notice_id = "";
+        await dismiss_in_app_alert();
     }
 
     async def view_distress_notice(packet_id: str) {
-        if distress_notice_timer.current {
-            clearTimeout(distress_notice_timer.current);
-            distress_notice_timer.current = None;
-        }
-        distress_notice_id = "";
         map_focus = {
             "packetId": packet_id,
             "nonce": int(map_focus["nonce"]) + 1,
@@ -437,7 +440,12 @@ def:pub AppShell -> JsxElement {
             await save_packets(updated);
 
             if packet.user_id != user_id and packet.status_code != 0 {
-                show_distress_notice(packet.unique_id());
+                await show_distress_notice(
+                    packet.unique_id(),
+                    packet.status_code,
+                    str(packet.user_id)[-6:],
+                    packet.timestamp
+                );
                 await emergency_haptic();
                 if show_notifications {
                     await notify_incoming(
@@ -765,7 +773,20 @@ def:pub AppShell -> JsxElement {
             unix_seconds()
         );
         if len(preview_distress) > 0 {
-            show_distress_notice(preview_distress[0].unique_id());
+            preview_packet = preview_distress[0];
+            await show_distress_notice(
+                preview_packet.unique_id(),
+                preview_packet.status_code,
+                str(preview_packet.user_id)[-6:],
+                preview_packet.timestamp
+            );
+        } else {
+            await show_distress_notice(
+                "__notification_test__",
+                1,
+                "TEST",
+                unix_seconds()
+            );
         }
         append_log(result.message);
         busy = False;
@@ -1067,9 +1088,6 @@ def:pub AppShell -> JsxElement {
     useEffect(lambda {
         return lambda {
             if strobe_timer.current { clearInterval(strobe_timer.current); }
-            if distress_notice_timer.current {
-                clearTimeout(distress_notice_timer.current);
-            }
             set_torch(False);
             stop_ultrasonic_listener();
             stop_compass();
@@ -1117,15 +1135,9 @@ def:pub AppShell -> JsxElement {
     now = unix_seconds();
     foreign_distress = active_foreign_distress(packets, user_id, now);
     urgent_count = len(foreign_distress);
-    notice_distress = [
-        packet
-        for packet in foreign_distress
-        if packet.unique_id() == distress_notice_id
-    ];
-    distress_age = (
-        max(0, notice_distress[0].age_seconds(now))
-        if len(notice_distress) > 0 else 0
-    );
+    notice_is_preview = distress_notice_id == "__notification_test__";
+    notice_is_active = bool(distress_notice_id);
+    distress_age = max(0, now - distress_notice_timestamp);
     distress_age_label = (
         str(distress_age) + "s ago"
         if distress_age < 60
@@ -1275,7 +1287,7 @@ def:pub AppShell -> JsxElement {
             </div>
         </header>
 
-        {if len(notice_distress) > 0 {
+        {if notice_is_active {
             <section
                 className="distress-presence"
                 role="alert"
@@ -1293,24 +1305,30 @@ def:pub AppShell -> JsxElement {
                             <Volume2 size={12} /> ALARM ACTIVE
                         </span>
                     </div>
-                    <strong>{status_label(notice_distress[0].status_code)}</strong>
-                    <p>{status_description(notice_distress[0].status_code)}</p>
+                    <strong>{status_label(distress_notice_status)}</strong>
+                    <p>{status_description(distress_notice_status)}</p>
                     <small>
-                        {"Node " + str(notice_distress[0].user_id)[-6:]
+                        {"Node " + distress_notice_node
                         + " · " + distress_age_label
-                        + (" · 1 active report" if urgent_count == 1 else " · " + str(urgent_count) + " active reports")}
+                        + (
+                            " · notification test"
+                            if notice_is_preview
+                            else (
+                                " · 1 active report"
+                                if urgent_count == 1
+                                else " · " + str(urgent_count) + " active reports"
+                            )
+                        )}
                     </small>
                 </div>
                 <button
                     className="distress-presence-action"
-                    onClick={lambda {
-                        view_distress_notice(notice_distress[0].unique_id());
-                    }}
-                    title="View distress reports on map"
-                    aria-label="View distress reports on map"
+                    onClick={dismiss_distress_notice}
+                    title="Dismiss alarm"
+                    aria-label="Dismiss alarm"
                 >
-                    <MapPin size={24} />
-                    <span>OPEN MAP</span>
+                    <X size={24} />
+                    <span>DISMISS ALARM</span>
                 </button>
             </section>
         }}

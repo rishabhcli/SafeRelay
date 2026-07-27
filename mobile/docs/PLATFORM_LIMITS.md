@@ -20,8 +20,8 @@
 - A received distress frame schedules a local notification in native code, so
   delivery does not depend on the suspended WebView running JavaScript.
 - While the app is open, every active, unexpired distress from another device
-  also holds a persistent in-app alert above the current view until the report
-  is marked safe, replaced, or expires.
+  also holds a persistent in-app alert and looping alarm above the current view
+  until the operator explicitly dismisses it.
 - Settings includes a notification self-test. On iOS it checks the current
   authorization and schedules through the same native queue used for received
   distress frames.

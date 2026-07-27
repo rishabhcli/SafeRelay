@@ -809,6 +809,20 @@ async def:pub present_native_incident {
 }
 
 
+async def:pub start_in_app_alert {
+    if not is_native() or native_platform() != "ios" { return; }
+    try { await NativeMesh.startAlert(); }
+    except Exception {}
+}
+
+
+async def:pub dismiss_in_app_alert {
+    if not is_native() or native_platform() != "ios" { return; }
+    try { await NativeMesh.dismissAlert(); }
+    except Exception {}
+}
+
+
 async def:pub emergency_haptic {
     if not is_native() { return; }
     try { await Haptics.impact({"style": ImpactStyle.Heavy}); }

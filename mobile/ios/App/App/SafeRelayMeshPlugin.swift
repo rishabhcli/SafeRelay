@@ -285,6 +285,7 @@ private final class SafeRelayAlertSoundPlayer: NSObject, AVAudioPlayerDelegate {
             let player = try AVAudioPlayer(contentsOf: soundURL)
             player.delegate = self
             player.volume = 1
+            player.numberOfLoops = -1
             player.prepareToPlay()
             self.player = player
             player.play()
@@ -295,8 +296,18 @@ private final class SafeRelayAlertSoundPlayer: NSObject, AVAudioPlayerDelegate {
         }
     }
 
+    func stop() {
+        player?.stop()
+        player = nil
+        deactivateSession()
+    }
+
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         self.player = nil
+        deactivateSession()
+    }
+
+    private func deactivateSession() {
         do {
             try AVAudioSession.sharedInstance().setActive(
                 false,
@@ -1488,6 +1499,8 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "publish", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "drain", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "testNotification", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "startAlert", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "dismissAlert", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "presentIncident", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startCompass", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopCompass", returnType: CAPPluginReturnPromise),
@@ -1588,6 +1601,16 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
                 }
             }
         }
+    }
+
+    @objc func startAlert(_ call: CAPPluginCall) {
+        SafeRelayAlertSoundPlayer.shared.play()
+        call.resolve()
+    }
+
+    @objc func dismissAlert(_ call: CAPPluginCall) {
+        SafeRelayAlertSoundPlayer.shared.stop()
+        call.resolve()
     }
 
     @objc func presentIncident(_ call: CAPPluginCall) {

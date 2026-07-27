@@ -4126,30 +4126,31 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
   box-shadow: none;
 }
 
-/* New distress reports float temporarily above the current view. */
+/* New distress reports take over the app until explicitly dismissed. */
 .distress-presence {
   position: fixed;
-  z-index: 30;
-  right: max(12px, calc((100vw - 896px) / 2));
-  bottom: calc(92px + env(safe-area-inset-bottom));
-  left: max(12px, calc((100vw - 896px) / 2));
-  display: grid;
-  grid-template-columns: 62px minmax(0, 1fr) 82px;
-  gap: 14px;
-  align-items: center;
-  min-height: 132px;
-  padding: 19px 16px 15px;
+  z-index: 10000;
+  inset: 0;
+  display: flex;
+  width: 100vw;
+  min-height: 100svh;
+  height: 100dvh;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 22px;
+  padding:
+    calc(env(safe-area-inset-top) + 40px)
+    max(28px, env(safe-area-inset-right))
+    calc(env(safe-area-inset-bottom) + 28px)
+    max(28px, env(safe-area-inset-left));
   overflow: hidden;
-  border: 2px solid #fff06a;
-  border-radius: var(--corner-radius);
+  border: 0;
+  border-radius: 0;
   background: #ff1645;
   color: #ffffff;
-  box-shadow:
-    0 0 0 3px rgba(255, 22, 69, 0.28),
-    0 12px 32px rgba(93, 8, 25, 0.52);
-  animation:
-    distress-presence-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both,
-    distress-presence-life 8s linear both;
+  box-shadow: none;
+  animation: distress-presence-enter 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .distress-presence::before {
@@ -4157,36 +4158,50 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
   top: 0;
   right: 0;
   left: 0;
-  height: 7px;
+  height: calc(env(safe-area-inset-top) + 14px);
   background: repeating-linear-gradient(
     135deg,
-    #fff06a 0 12px,
-    #4c0010 12px 24px
+    #fff06a 0 18px,
+    #4c0010 18px 36px
   );
   content: "";
 }
 
 .distress-presence-icon {
   display: grid;
-  width: 60px;
-  height: 60px;
+  width: 136px;
+  height: 136px;
+  flex: 0 0 auto;
   place-items: center;
   align-content: center;
-  gap: 1px;
-  border: 2px solid #ffffff;
+  gap: 5px;
+  margin: 18px auto 0;
+  border: 4px solid #ffffff;
   border-radius: 50%;
   background: #fff06a;
   color: #39000b;
   animation: distress-presence-pulse 1s ease-out infinite;
 }
 
+.distress-presence-icon svg {
+  width: 58px;
+  height: 58px;
+  stroke-width: 2.5;
+}
+
 .distress-presence-icon small {
   color: #780018;
-  font: 900 7px ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font: 900 13px ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 .distress-presence-copy {
+  display: flex;
   min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 
 .distress-presence-copy > strong,
@@ -4200,119 +4215,132 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
 .distress-presence-kicker {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 10px;
   align-items: center;
+  justify-content: center;
 }
 
 .distress-presence-kicker > span {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 7px;
   color: #fff799;
-  font: 800 10px ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font: 900 12px ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 .distress-presence-kicker .distress-presence-audio {
-  padding: 3px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  padding: 6px 9px;
+  border: 2px solid rgba(255, 255, 255, 0.72);
   border-radius: 4px;
   background: rgba(76, 0, 16, 0.28);
   color: #ffffff;
-  font-size: 8px;
+  font-size: 10px;
 }
 
 .distress-presence-copy > strong {
-  margin-top: 5px;
+  margin-top: 22px;
   font-family: "DIN Condensed", "Avenir Next Condensed", sans-serif;
-  font-size: 23px;
-  line-height: 1;
+  font-size: 58px;
+  line-height: 0.9;
 }
 
 .distress-presence-copy > p {
-  margin-block: 4px 0;
-  font-size: 12px;
-  font-weight: 750;
-  line-height: 1.25;
+  max-width: 520px;
+  margin-block: 16px 0;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1.18;
 }
 
 .distress-presence-copy > small {
-  margin-top: 6px;
-  color: rgba(255, 255, 255, 0.82);
-  font: 700 9px ui-monospace, "SFMono-Regular", Menlo, monospace;
-  line-height: 1.3;
+  margin-top: 16px;
+  color: rgba(255, 255, 255, 0.9);
+  font: 800 12px ui-monospace, "SFMono-Regular", Menlo, monospace;
+  line-height: 1.45;
 }
 
 .distress-presence-action {
-  display: grid;
-  width: 80px;
-  height: 78px;
+  display: flex;
+  width: 100%;
+  max-width: 560px;
+  min-height: 76px;
+  flex: 0 0 auto;
   place-items: center;
-  align-content: center;
-  gap: 5px;
-  padding: 6px;
-  border: 2px solid #ffffff;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  border: 3px solid #ffffff;
   border-radius: var(--corner-radius);
-  background: #ffffff;
-  color: #780018;
+  background: #fff06a;
+  color: #4c0010;
   cursor: pointer;
+  box-shadow: 0 10px 0 #780018;
 }
 
 .distress-presence-action span {
-  font: 900 9px ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font: 900 15px ui-monospace, "SFMono-Regular", Menlo, monospace;
   line-height: 1.1;
   text-align: center;
 }
 
+.distress-presence-action svg {
+  width: 28px;
+  height: 28px;
+  stroke-width: 2.5;
+}
+
 @keyframes distress-presence-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(255, 240, 106, 0.72); }
-  100% { box-shadow: 0 0 0 12px rgba(255, 240, 106, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(255, 240, 106, 0.8); }
+  100% { box-shadow: 0 0 0 28px rgba(255, 240, 106, 0); }
 }
 
 @keyframes distress-presence-enter {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.97);
+    transform: scale(1.04);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: scale(1);
   }
 }
 
-@keyframes distress-presence-life {
-  0%,
-  88% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-@media (max-width: 380px) {
+@media (max-height: 720px) {
   .distress-presence {
-    grid-template-columns: 52px minmax(0, 1fr) 64px;
-    gap: 9px;
-    min-height: 124px;
-    padding: 17px 9px 11px;
+    gap: 12px;
+    padding-top: calc(env(safe-area-inset-top) + 28px);
+    padding-bottom: calc(env(safe-area-inset-bottom) + 20px);
   }
 
   .distress-presence-icon {
-    width: 50px;
-    height: 50px;
+    width: 104px;
+    height: 104px;
+    margin-top: 10px;
+  }
+
+  .distress-presence-icon svg {
+    width: 42px;
+    height: 42px;
   }
 
   .distress-presence-copy > strong {
-    font-size: 19px;
+    margin-top: 14px;
+    font-size: 46px;
   }
 
   .distress-presence-copy > p {
-    font-size: 11px;
+    margin-top: 10px;
+    font-size: 18px;
   }
 
-  .distress-presence-kicker .distress-presence-audio {
-    display: none;
+  .distress-presence-copy > small {
+    margin-top: 10px;
   }
 
   .distress-presence-action {
-    width: 62px;
-    height: 70px;
+    min-height: 66px;
   }
 }
 
@@ -4326,12 +4354,15 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .distress-presence,
-  .distress-presence-icon,
-  .distress-presence-action {
+  .distress-presence {
     background: #ff1645;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
+  }
+
+  .distress-presence-icon,
+  .distress-presence-action {
+    background: #fff06a;
   }
 }
 
