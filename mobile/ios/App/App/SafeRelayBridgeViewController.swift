@@ -2,6 +2,12 @@ import Capacitor
 import UIKit
 import WebKit
 
+extension Notification.Name {
+    static let safeRelayPresentIncident = Notification.Name(
+        "com.development.saferelay.presentIncident"
+    )
+}
+
 enum SafeRelayMetrics {
     static let componentCornerRadius: CGFloat = 18
     static let nativeTabBarContentHeight: CGFloat = 49
@@ -71,6 +77,8 @@ final class SafeRelayBridgeViewController:
     private var survivalTextView: UITextView?
     private var survivalPlaceholder: UILabel?
     private var survivalSendButton: UIButton?
+    private var survivalComposerTabConstraint: NSLayoutConstraint?
+    private var survivalComposerKeyboardConstraint: NSLayoutConstraint?
     private var installedNativeChromeUserScript = false
     private var signalTint: UIColor {
         UIColor { traits in
@@ -83,7 +91,29 @@ final class SafeRelayBridgeViewController:
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(SafeRelayFoundationModelsPlugin())
         bridge?.registerPluginInstance(SafeRelayNativeMeshPlugin())
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(presentIncidentFromNotification),
+            name: .safeRelayPresentIncident,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillShow),
+            name: UIResponder.keyboardWillShowNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keyboardWillHide),
+            name: UIResponder.keyboardWillHideNotification,
+            object: nil
+        )
         installNativeChrome()
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -757,9 +787,17 @@ final class SafeRelayBridgeViewController:
         textView.tintColor = signalTint
         textView.returnKeyType = .send
         textView.keyboardDismissMode = .interactive
+        textView.isEditable = true
+        textView.isSelectable = true
         textView.textContainerInset = UIEdgeInsets(top: 11, left: 5, bottom: 9, right: 2)
         textView.textContainer.lineFragmentPadding = 0
         textView.accessibilityLabel = "Message Survival Guide"
+        let focusGesture = UITapGestureRecognizer(
+            target: self,
+            action: #selector(focusNativeSurvivalComposer)
+        )
+        focusGesture.cancelsTouchesInView = false
+        textView.addGestureRecognizer(focusGesture)
 
         let placeholder = UILabel()
         placeholder.translatesAutoresizingMaskIntoConstraints = false
@@ -789,10 +827,18 @@ final class SafeRelayBridgeViewController:
         glassView.contentView.addSubview(placeholder)
         glassView.contentView.addSubview(sendButton)
 
+        let tabConstraint = container.bottomAnchor.constraint(
+            equalTo: nativeTabBar.topAnchor,
+            constant: -18
+        )
+        let keyboardConstraint = container.bottomAnchor.constraint(
+            equalTo: view.keyboardLayoutGuide.topAnchor,
+            constant: -12
+        )
         NSLayoutConstraint.activate([
             container.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             container.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            container.bottomAnchor.constraint(equalTo: nativeTabBar.topAnchor, constant: -18),
+            tabConstraint,
             container.heightAnchor.constraint(equalToConstant: 60),
 
             glassView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -818,6 +864,8 @@ final class SafeRelayBridgeViewController:
         survivalTextView = textView
         survivalPlaceholder = placeholder
         survivalSendButton = sendButton
+        survivalComposerTabConstraint = tabConstraint
+        survivalComposerKeyboardConstraint = keyboardConstraint
     }
 
     private func configureSegmentedControl(_ control: UISegmentedControl) {
@@ -897,6 +945,14 @@ final class SafeRelayBridgeViewController:
         }
 
         clickJacElement(tab.elementID)
+    }
+
+    @objc private func presentIncidentFromNotification() {
+        guard let mapIndex = nativeTabs.firstIndex(
+            where: { $0.elementID == "nav-map" }
+        ) else { return }
+        updateNativeControlVisibility(for: mapIndex)
+        scheduleNativeControlSync()
     }
 
     private func updateNativeControlVisibility(for index: Int) {
@@ -1085,6 +1141,43 @@ final class SafeRelayBridgeViewController:
             view.bringSubviewToFront(survivalComposerContainer)
         } else {
             survivalTextView?.resignFirstResponder()
+        }
+    }
+
+    @objc private func focusNativeSurvivalComposer() {
+        guard survivalComposerContainer?.isHidden == false,
+              survivalTextView?.window != nil else { return }
+        survivalTextView?.becomeFirstResponder()
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        guard survivalTextView?.isFirstResponder == true else { return }
+        survivalComposerTabConstraint?.isActive = false
+        survivalComposerKeyboardConstraint?.isActive = true
+        animateAlongsideKeyboard(notification)
+    }
+
+    @objc private func keyboardWillHide(_ notification: Notification) {
+        survivalComposerKeyboardConstraint?.isActive = false
+        survivalComposerTabConstraint?.isActive = true
+        animateAlongsideKeyboard(notification)
+    }
+
+    private func animateAlongsideKeyboard(_ notification: Notification) {
+        let userInfo = notification.userInfo
+        let duration = (userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
+            .doubleValue ?? 0.25
+        let curve = (userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?
+            .uintValue ?? 0
+        UIView.animate(
+            withDuration: duration,
+            delay: 0,
+            options: [
+                UIView.AnimationOptions(rawValue: curve << 16),
+                .beginFromCurrentState,
+            ]
+        ) {
+            self.view.layoutIfNeeded()
         }
     }
 

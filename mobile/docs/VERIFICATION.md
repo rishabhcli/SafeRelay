@@ -76,3 +76,41 @@ a connected peer.
 These results prove native Bluetooth exchange and receipt handling while the
 receiving UI is foregrounded, backgrounded, and locked. They do not replace the
 remaining network-isolated and system-termination matrix rows above.
+
+## Physical three-iPhone multi-hop matrix
+
+Use three qualifying physical iPhones arranged as A-to-B-to-C. Verify first
+that A and C cannot discover or exchange a fresh control packet directly, while
+A-to-B and B-to-C remain reliable. Keep Wi-Fi and cellular unavailable.
+
+| Sender | Relay | Receiver | Relay state | Expected evidence |
+| --- | --- | --- | --- | --- |
+| A | B | C | foreground | C receives A sender/sequence at hop `1` |
+| C | B | A | foreground | A receives C sender/sequence at hop `1` |
+| A | B | C | background/locked | C receives through native forwarding |
+| A | B | C | temporarily disconnected | B stores, then delivers when C returns |
+| A | removed | C | unavailable | no receipt, proving no direct A-to-C path |
+| A | B | C | five-hop fixture | B does not forward beyond hop `5` |
+
+Capture native logs on all three devices, the exact frame bytes at each link,
+sender/sequence, hop count, timestamps, and receipt source. A passing build,
+codec test, two-phone exchange, or an A-to-C path that was not independently
+excluded does not prove multi-hop delivery. This matrix remains unverified until
+all three physical phones are available and the evidence is recorded here.
+
+### 2026-07-26 multi-hop implementation evidence
+
+- `jac check .` completed with the repository's existing type warnings.
+- All 35 focused protocol and operations tests passed.
+- A signed arm64 iPhoneOS 27 build succeeded and compiled the native relay.
+- The same build installed on both qualifying connected phones. It launched on
+  `Phoney`, where Device Hub showed the native shell with the mesh active.
+- `Physical iPhone` rejected launch with Apple's `Unable to Verify App` gate,
+  although installation succeeded.
+- Physical A-to-B-to-C validation remains blocked. The third connected iPhone
+  runs iOS 26.5.2 and is ineligible for this iOS 27 application; no simulator,
+  iPad, or Android device was substituted.
+
+These checks cover the reliability hardening statically and at build time, but
+do not prove scanning, advertising, background continuity, or multi-hop radio
+delivery.

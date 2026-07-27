@@ -1,8 +1,10 @@
 """SafeRelay wire protocol and offline mesh policy."""
 
 glob CLIENT_PACKET_HEADER: int = 65535;
-glob CLIENT_PACKET_SIZE: int = 25;
+glob CLIENT_PACKET_SIZE: int = 27;
+glob CLIENT_UNVERSIONED_PACKET_SIZE: int = 25;
 glob CLIENT_LEGACY_PACKET_SIZE: int = 21;
+glob CLIENT_PACKET_VERSION: int = 1;
 glob CLIENT_MAX_PACKET_AGE_SECONDS: int = 86400;
 glob CLIENT_MAX_RELAY_HOPS: int = 5;
 
@@ -138,6 +140,16 @@ def _client_validate_status(code: int) {
 }
 
 
+def _client_validate_coordinates(latitude_e7: int, longitude_e7: int) {
+    if latitude_e7 < -900000000 or latitude_e7 > 900000000 {
+        raise ValueError("SafeRelay packet latitude is outside valid bounds");
+    }
+    if longitude_e7 < -1800000000 or longitude_e7 > 1800000000 {
+        raise ValueError("SafeRelay packet longitude is outside valid bounds");
+    }
+}
+
+
 def _client_byte(value: int, shift: int) -> int {
     return (value >> shift) & 255;
 }
@@ -145,6 +157,10 @@ def _client_byte(value: int, shift: int) -> int {
 
 def:pub client_packet_to_bytes(packet: ClientSosPacket) -> list[int] {
     _client_validate_status(packet.status_code);
+    _client_validate_coordinates(packet.latitude_e7, packet.longitude_e7);
+    if packet.relay_hops < 0 or packet.relay_hops > CLIENT_MAX_RELAY_HOPS {
+        raise ValueError("SafeRelay packet exceeds relay hop limit");
+    }
     return [
         255,
         255,
@@ -170,7 +186,9 @@ def:pub client_packet_to_bytes(packet: ClientSosPacket) -> list[int] {
         _client_byte(packet.target_id, 24),
         _client_byte(packet.target_id, 16),
         _client_byte(packet.target_id, 8),
-        _client_byte(packet.target_id, 0)
+        _client_byte(packet.target_id, 0),
+        CLIENT_PACKET_VERSION,
+        packet.relay_hops
     ];
 }
 
@@ -197,15 +215,29 @@ def _client_i32(packet_bytes: list[int], offset: int) -> int {
 
 
 def:pub client_packet_from_bytes(packet_bytes: list[int], rssi: int = -127) -> ClientSosPacket {
-    if len(packet_bytes) != CLIENT_LEGACY_PACKET_SIZE and len(packet_bytes) != CLIENT_PACKET_SIZE {
+    if (
+        len(packet_bytes) != CLIENT_LEGACY_PACKET_SIZE
+        and len(packet_bytes) != CLIENT_UNVERSIONED_PACKET_SIZE
+        and len(packet_bytes) != CLIENT_PACKET_SIZE
+    ) {
         raise ValueError(
-            "Invalid packet size: " + str(len(packet_bytes)) + ", expected 21 or 25"
+            "Invalid packet size: " + str(len(packet_bytes)) + ", expected 21, 25, or 27"
         );
     }
     if _client_u16(packet_bytes, 0) != CLIENT_PACKET_HEADER {
         raise ValueError("Invalid SafeRelay packet header");
     }
     _client_validate_status(packet_bytes[16]);
+    _client_validate_coordinates(
+        _client_i32(packet_bytes, 8),
+        _client_i32(packet_bytes, 12)
+    );
+    if len(packet_bytes) == CLIENT_PACKET_SIZE and packet_bytes[25] != CLIENT_PACKET_VERSION {
+        raise ValueError("Unsupported SafeRelay packet version");
+    }
+    if len(packet_bytes) == CLIENT_PACKET_SIZE and packet_bytes[26] > CLIENT_MAX_RELAY_HOPS {
+        raise ValueError("SafeRelay packet exceeds relay hop limit");
+    }
     return ClientSosPacket(
         user_id=_client_u32(packet_bytes, 2),
         sequence=_client_u16(packet_bytes, 6),
@@ -213,8 +245,9 @@ def:pub client_packet_from_bytes(packet_bytes: list[int], rssi: int = -127) -> C
         longitude_e7=_client_i32(packet_bytes, 12),
         status_code=packet_bytes[16],
         timestamp=_client_u32(packet_bytes, 17),
-        target_id=_client_u32(packet_bytes, 21) if len(packet_bytes) == CLIENT_PACKET_SIZE else 0,
-        rssi=rssi
+        target_id=_client_u32(packet_bytes, 21) if len(packet_bytes) >= CLIENT_UNVERSIONED_PACKET_SIZE else 0,
+        rssi=rssi,
+        relay_hops=packet_bytes[26] if len(packet_bytes) == CLIENT_PACKET_SIZE else 0
     );
 }
 
@@ -294,7 +327,7 @@ def:pub client_evaluate_relay(
             unknowns=unknowns
         );
     }
-    if packet.relay_hops >= CLIENT_MAX_RELAY_HOPS and _client_status_priority(packet.status_code) < 3 {
+    if packet.relay_hops >= CLIENT_MAX_RELAY_HOPS {
         return ClientRelayResult(
             decision="drop",
             reason="Relay hop limit reached",

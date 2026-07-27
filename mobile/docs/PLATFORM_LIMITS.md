@@ -7,6 +7,14 @@
   receipt notifications in a native CoreBluetooth service. The central and
   peripheral managers use restoration identifiers and start from
   `AppDelegate` when relay was previously enabled.
+- The native service persists a bounded store-and-forward queue, increments the
+  on-wire hop count, rejects stale or malformed frames, and stops every packet
+  at five relay hops even while the WebView is suspended.
+- Queue replay covers both GATT roles: discovered peripherals receive
+  acknowledged writes, while newly subscribed centrals receive the retained
+  queue. Failed writes retry twice and failed connections back off to 30 seconds.
+- Radio queues, duplicate history, and tracked peer counts are bounded to
+  prevent malformed or high-volume traffic from growing memory without limit.
 - Background scanning must use a service UUID, which SafeRelay does.
 - iOS may coalesce discoveries and advertising intervals while backgrounded.
 - A received distress frame schedules a local notification in native code, so
@@ -51,6 +59,7 @@
 - "Packet received" is not "responder acknowledged."
 - RSSI distance is an estimate, not a measured range.
 - Background and dual-role behavior require physical-device verification.
+- A direct two-phone test proves one radio link, not an A-to-B-to-C relay.
 - Offline receipt alerts are local notifications triggered by BLE receipt, not
   APNs remote push notifications.
 - GDACS browser access can be blocked by CORS; native builds use Capacitor's

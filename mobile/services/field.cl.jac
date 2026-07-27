@@ -491,6 +491,12 @@ def _attempt(
 }
 
 
+def _cloud_device_id(user_id: int) -> str {
+    raw = str(hex(user_id));
+    return raw[2:].zfill(8);
+}
+
+
 async def:pub sync_relayed_packets(
     packets: list[any],  # jac:ignore[W1037]
     local_user_id: int,
@@ -536,10 +542,10 @@ async def:pub sync_relayed_packets(
     duplicates = 0;
     synced_ids: list[str] = [];
     receipts: list[dict[str, object]] = [];
-    device_id = hex(local_user_id)[2:].zfill(8);
+    device_id = _cloud_device_id(local_user_id);
     for packet in pending {
         packet_id = packet.unique_id();
-        origin_id = hex(packet.user_id)[2:].zfill(8);
+        origin_id = _cloud_device_id(packet.user_id);
         try {
             response: any = await _cloud_post(  # jac:ignore[W1037]
                 "/function/ingest_mobile_signal",

@@ -50,7 +50,7 @@ def:pub IncidentMap(
     location_ready: bool,
     location_message: str,
     on_locate: any,  # jac:ignore[W1037]
-    focus_packet_id: str = "",
+    focus: dict[str, object] | None = None,
 ) -> JsxElement {
     has container_ref: Ref[HTMLDivElement] = Ref();
     has map_ref: Ref[any] = Ref(None);  # jac:ignore[W1037]
@@ -58,6 +58,8 @@ def:pub IncidentMap(
     has did_auto_center: Ref[bool] = Ref(False);
     has selected_packet_id: str = "";
     has locating: bool = False;
+    focus_packet_id = str(focus["packetId"]) if focus else "";
+    focus_nonce = int(focus["nonce"]) if focus else 0;
 
     initial_center: list[float] = (
         [longitude, latitude] if location_ready else packet_center(packets)
@@ -201,7 +203,7 @@ def:pub IncidentMap(
                 }
             }
         },
-        [focus_packet_id, packets],
+        [focus_packet_id, focus_nonce, packets],
     );
 
     useEffect(

@@ -4131,59 +4131,112 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
   position: fixed;
   z-index: 30;
   right: max(12px, calc((100vw - 896px) / 2));
-  bottom: calc(84px + env(safe-area-inset-bottom));
+  bottom: calc(92px + env(safe-area-inset-bottom));
   left: max(12px, calc((100vw - 896px) / 2));
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 52px;
-  gap: 11px;
+  grid-template-columns: 62px minmax(0, 1fr) 82px;
+  gap: 14px;
   align-items: center;
-  min-height: 82px;
-  padding: 10px 12px;
+  min-height: 132px;
+  padding: 19px 16px 15px;
   overflow: hidden;
-  border-block: 1px solid rgba(255, 255, 255, 0.24);
+  border: 2px solid #fff06a;
   border-radius: var(--corner-radius);
-  background: #a8192f;
+  background: #ff1645;
   color: #ffffff;
-  box-shadow: 0 10px 28px rgba(93, 8, 25, 0.36);
+  box-shadow:
+    0 0 0 3px rgba(255, 22, 69, 0.28),
+    0 12px 32px rgba(93, 8, 25, 0.52);
   animation:
     distress-presence-enter 320ms cubic-bezier(0.22, 1, 0.36, 1) both,
     distress-presence-life 8s linear both;
 }
 
+.distress-presence::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 7px;
+  background: repeating-linear-gradient(
+    135deg,
+    #fff06a 0 12px,
+    #4c0010 12px 24px
+  );
+  content: "";
+}
+
 .distress-presence-icon {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 60px;
+  height: 60px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.42);
+  align-content: center;
+  gap: 1px;
+  border: 2px solid #ffffff;
   border-radius: 50%;
-  background: rgba(68, 2, 15, 0.28);
-  animation: distress-presence-pulse 1.6s ease-out infinite;
+  background: #fff06a;
+  color: #39000b;
+  animation: distress-presence-pulse 1s ease-out infinite;
+}
+
+.distress-presence-icon small {
+  color: #780018;
+  font: 900 7px ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 .distress-presence-copy {
   min-width: 0;
 }
 
-.distress-presence-copy > span,
 .distress-presence-copy > strong,
+.distress-presence-copy > p,
 .distress-presence-copy > small {
   display: block;
+  margin-inline: 0;
   overflow-wrap: anywhere;
 }
 
-.distress-presence-copy > span {
+.distress-presence-kicker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+}
+
+.distress-presence-kicker > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff799;
   font: 800 10px ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
+.distress-presence-kicker .distress-presence-audio {
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 4px;
+  background: rgba(76, 0, 16, 0.28);
+  color: #ffffff;
+  font-size: 8px;
+}
+
 .distress-presence-copy > strong {
-  margin-top: 2px;
-  font-size: 15px;
+  margin-top: 5px;
+  font-family: "DIN Condensed", "Avenir Next Condensed", sans-serif;
+  font-size: 23px;
+  line-height: 1;
+}
+
+.distress-presence-copy > p {
+  margin-block: 4px 0;
+  font-size: 12px;
+  font-weight: 750;
   line-height: 1.25;
 }
 
 .distress-presence-copy > small {
-  margin-top: 3px;
+  margin-top: 6px;
   color: rgba(255, 255, 255, 0.82);
   font: 700 9px ui-monospace, "SFMono-Regular", Menlo, monospace;
   line-height: 1.3;
@@ -4191,25 +4244,28 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
 
 .distress-presence-action {
   display: grid;
-  width: 50px;
-  height: 52px;
+  width: 80px;
+  height: 78px;
   place-items: center;
   align-content: center;
-  gap: 2px;
-  border: 1px solid rgba(255, 255, 255, 0.44);
+  gap: 5px;
+  padding: 6px;
+  border: 2px solid #ffffff;
   border-radius: var(--corner-radius);
-  background: rgba(52, 0, 10, 0.24);
-  color: #ffffff;
+  background: #ffffff;
+  color: #780018;
   cursor: pointer;
 }
 
 .distress-presence-action span {
-  font: 800 8px ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font: 900 9px ui-monospace, "SFMono-Regular", Menlo, monospace;
+  line-height: 1.1;
+  text-align: center;
 }
 
 @keyframes distress-presence-pulse {
-  0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.42); }
-  100% { box-shadow: 0 0 0 10px rgba(255, 255, 255, 0); }
+  0% { box-shadow: 0 0 0 0 rgba(255, 240, 106, 0.72); }
+  100% { box-shadow: 0 0 0 12px rgba(255, 240, 106, 0); }
 }
 
 @keyframes distress-presence-enter {
@@ -4231,22 +4287,32 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
 
 @media (max-width: 380px) {
   .distress-presence {
-    grid-template-columns: 38px minmax(0, 1fr) 46px;
-    gap: 8px;
-    padding-inline: 9px;
+    grid-template-columns: 52px minmax(0, 1fr) 64px;
+    gap: 9px;
+    min-height: 124px;
+    padding: 17px 9px 11px;
   }
 
   .distress-presence-icon {
-    width: 36px;
-    height: 36px;
+    width: 50px;
+    height: 50px;
   }
 
   .distress-presence-copy > strong {
-    font-size: 13px;
+    font-size: 19px;
+  }
+
+  .distress-presence-copy > p {
+    font-size: 11px;
+  }
+
+  .distress-presence-kicker .distress-presence-audio {
+    display: none;
   }
 
   .distress-presence-action {
-    width: 44px;
+    width: 62px;
+    height: 70px;
   }
 }
 
@@ -4263,7 +4329,7 @@ html.native-liquid-glass .app-shell:has(.map-tab-panel) {
   .distress-presence,
   .distress-presence-icon,
   .distress-presence-action {
-    background: #8f1328;
+    background: #ff1645;
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }

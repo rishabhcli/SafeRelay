@@ -1,3 +1,4 @@
+import AVFAudio
 import Capacitor
 import CoreBluetooth
 import CoreLocation
@@ -11,6 +12,7 @@ private let meshServiceUUID = CBUUID(string: "12345678-1234-1234-1234-123456789A
 private let meshPacketUUID = CBUUID(string: "12345678-1234-1234-1234-123456789ABD")
 private let distressNotificationCategory = "SAFERELAY_DISTRESS"
 private let viewIncidentAction = "SAFERELAY_VIEW_INCIDENT"
+private let signalSoundName = UNNotificationSoundName(rawValue: "SafeRelaySignal.caf")
 
 private struct PendingCloudSignal: Codable {
     let messageID: String
@@ -55,12 +57,28 @@ private struct MeshPacketEvent {
     }
 }
 
+private struct PendingPeerWrite {
+    let data: Data
+    var attempts: Int = 0
+}
+
 private enum MeshPacket {
+    static let currentSize = 27
+    static let currentVersion: UInt8 = 1
+    static let maxRelayHops: UInt8 = 5
+    static let maxAge: TimeInterval = 86_400
+
     static func isValid(_ data: Data) -> Bool {
-        (data.count == 21 || data.count == 25)
+        (data.count == 21 || data.count == 25 || data.count == currentSize)
             && data[0] == 0xff
             && data[1] == 0xff
             && data[16] <= 5
+            && (-900_000_000...900_000_000).contains(signedInteger(data, at: 8))
+            && (-1_800_000_000...1_800_000_000).contains(signedInteger(data, at: 12))
+            && (
+                data.count != currentSize
+                    || (data[25] == currentVersion && data[26] <= maxRelayHops)
+            )
     }
 
     static func key(_ data: Data) -> String? {
@@ -81,18 +99,117 @@ private enum MeshPacket {
         Int32(bitPattern: unsignedInteger(data, at: offset))
     }
 
+    static func relayHopCount(_ data: Data) -> UInt8 {
+        data.count == currentSize ? data[26] : 0
+    }
+
+    static func senderID(_ data: Data) -> UInt32 {
+        unsignedInteger(data, at: 2)
+    }
+
+    static func sequence(_ data: Data) -> UInt16 {
+        UInt16(data[6]) << 8 | UInt16(data[7])
+    }
+
+    static func reportedAt(_ data: Data) -> UInt32 {
+        unsignedInteger(data, at: 17)
+    }
+
+    static func priority(_ data: Data) -> Int {
+        switch data[16] {
+        case 0, 1, 3: return 3
+        case 2: return 2
+        case 4, 5: return 1
+        default: return 0
+        }
+    }
+
+    static func relayComesBefore(_ left: Data, _ right: Data) -> Bool {
+        let leftPriority = priority(left)
+        let rightPriority = priority(right)
+        if leftPriority != rightPriority {
+            return leftPriority > rightPriority
+        }
+        let leftTimestamp = reportedAt(left)
+        let rightTimestamp = reportedAt(right)
+        if leftTimestamp != rightTimestamp {
+            return leftTimestamp > rightTimestamp
+        }
+        let leftSender = senderID(left)
+        let rightSender = senderID(right)
+        if leftSender != rightSender {
+            return leftSender < rightSender
+        }
+        return sequence(left) > sequence(right)
+    }
+
+    static func orderedForRelay(_ frames: [Data]) -> [Data] {
+        var newestBySender: [UInt32: Data] = [:]
+        for frame in frames where isFresh(frame) {
+            let sender = senderID(frame)
+            if let existing = newestBySender[sender] {
+                let existingTimestamp = reportedAt(existing)
+                let candidateTimestamp = reportedAt(frame)
+                if existingTimestamp > candidateTimestamp {
+                    continue
+                }
+                if existingTimestamp == candidateTimestamp {
+                    if sequence(existing) > sequence(frame) {
+                        continue
+                    }
+                    if sequence(existing) == sequence(frame),
+                       relayHopCount(existing) <= relayHopCount(frame) {
+                        continue
+                    }
+                }
+            }
+            newestBySender[sender] = frame
+        }
+        return newestBySender.values.sorted(by: relayComesBefore)
+    }
+
+    static func isFresh(_ data: Data, now: Date = Date()) -> Bool {
+        guard isValid(data) else { return false }
+        let reportedAt = TimeInterval(MeshPacket.reportedAt(data))
+        let age = now.timeIntervalSince1970 - reportedAt
+        return age >= -300 && age <= maxAge
+    }
+
+    static func forwarded(_ data: Data, now: Date = Date()) -> Data? {
+        guard isFresh(data, now: now),
+              data[16] != 0,
+              relayHopCount(data) < maxRelayHops else {
+            return nil
+        }
+
+        var frame = data
+        if frame.count == 21 {
+            frame.append(contentsOf: [0, 0, 0, 0])
+        }
+        if frame.count == 25 {
+            frame.append(currentVersion)
+            frame.append(1)
+        } else {
+            frame[26] += 1
+        }
+        return frame
+    }
+
     static func notificationUserInfo(_ data: Data) -> [AnyHashable: Any]? {
         guard isValid(data) else { return nil }
-        let sequence = UInt16(data[6]) << 8 | UInt16(data[7])
+        let userID = senderID(data)
+        let packetSequence = MeshPacket.sequence(data)
         return [
             "kind": "mesh-distress",
             "packetKey": key(data) ?? "unknown",
-            "userId": String(unsignedInteger(data, at: 2)),
-            "sequence": Int(sequence),
+            "packetId": "\(userID)_\(packetSequence)",
+            "userId": String(userID),
+            "sequence": Int(packetSequence),
             "latitude": Double(signedInteger(data, at: 8)) / 10_000_000,
             "longitude": Double(signedInteger(data, at: 12)) / 10_000_000,
             "statusCode": Int(data[16]),
             "reportedAt": Double(unsignedInteger(data, at: 17)),
+            "relayHops": Int(relayHopCount(data)),
             "relaySource": "Nearby Bluetooth mesh",
         ]
     }
@@ -103,11 +220,11 @@ private enum MeshPacket {
         deliveredBy: String
     ) -> PendingCloudSignal? {
         guard isValid(data) else { return nil }
-        let userID = unsignedInteger(data, at: 2)
-        let sequence = UInt16(data[6]) << 8 | UInt16(data[7])
+        let userID = senderID(data)
+        let packetSequence = MeshPacket.sequence(data)
         let originDeviceID = String(format: "%08x", userID)
         return PendingCloudSignal(
-            messageID: "\(originDeviceID)_\(sequence)",
+            messageID: "\(originDeviceID)_\(packetSequence)",
             originDeviceID: originDeviceID,
             latitude: Double(signedInteger(data, at: 8)) / 10_000_000,
             longitude: Double(signedInteger(data, at: 12)) / 10_000_000,
@@ -115,7 +232,7 @@ private enum MeshPacket {
             packetTimestamp: unsignedInteger(data, at: 17),
             rssi: max(-127, min(20, rssi)),
             deliveredBy: deliveredBy,
-            hopCount: 0,
+            hopCount: Int(relayHopCount(data)),
             queuedAt: Date()
         )
     }
@@ -133,12 +250,63 @@ private enum MeshPacket {
         let content = UNMutableNotificationContent()
         content.title = "SafeRelay: \(title)"
         content.body = body
-        content.sound = .default
+        content.sound = UNNotificationSound(named: signalSoundName)
         content.interruptionLevel = .timeSensitive
         content.relevanceScore = 1
         content.categoryIdentifier = distressNotificationCategory
         content.userInfo = notificationUserInfo(data) ?? [:]
         return content
+    }
+}
+
+private final class SafeRelayAlertSoundPlayer: NSObject, AVAudioPlayerDelegate {
+    static let shared = SafeRelayAlertSoundPlayer()
+
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "com.development.saferelay",
+        category: "AlertSound"
+    )
+    private var player: AVAudioPlayer?
+
+    func play() {
+        guard let soundURL = Bundle.main.url(
+            forResource: "SafeRelaySignal",
+            withExtension: "caf"
+        ) else {
+            logger.error("SafeRelaySignal.caf is missing from the app bundle")
+            return
+        }
+
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [.duckOthers])
+            try session.setActive(true)
+
+            let player = try AVAudioPlayer(contentsOf: soundURL)
+            player.delegate = self
+            player.volume = 1
+            player.prepareToPlay()
+            self.player = player
+            player.play()
+        } catch {
+            logger.error(
+                "Alert sound failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        self.player = nil
+        do {
+            try AVAudioSession.sharedInstance().setActive(
+                false,
+                options: [.notifyOthersOnDeactivation]
+            )
+        } catch {
+            logger.error(
+                "Alert audio session cleanup failed: \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 }
 
@@ -152,10 +320,13 @@ final class SafeRelayMeshService: NSObject {
     private let defaults = UserDefaults.standard
     private let enabledKey = "saferelay.mesh.enabled"
     private let packetKey = "saferelay.mesh.latestPacket"
+    private let relayQueueKey = "saferelay.mesh.relayQueue.v1"
+    private let seenPacketsKey = "saferelay.mesh.seenPackets.v1"
     private let cloudOutboxKey = "saferelay.cloud.nativeOutbox"
     private let relayDeviceIDKey = "saferelay.cloud.relayDeviceID"
     private let centralRestoreID = "com.development.saferelay.mesh.central"
     private let peripheralRestoreID = "com.development.saferelay.mesh.peripheral"
+    private let maxTrackedPeers = 64
     private let pathMonitor = NWPathMonitor()
     private let pathMonitorQueue = DispatchQueue(
         label: "com.development.saferelay.cloud-reachability"
@@ -167,6 +338,12 @@ final class SafeRelayMeshService: NSObject {
     private var connectedPeripherals: [UUID: CBPeripheral] = [:]
     private var pendingEvents: [MeshPacketEvent] = []
     private var seenPackets: [String: Date] = [:]
+    private var pendingWrites: [UUID: [PendingPeerWrite]] = [:]
+    private var inFlightWrites: [UUID: PendingPeerWrite] = [:]
+    private var pendingNotifications: [Data] = []
+    private var connectionFailures: [UUID: Int] = [:]
+    private var reconnectScheduled: Set<UUID> = []
+    private var relayStateRestored = false
     private var started = false
     private var serviceAdded = false
     private var startCompletions: [(Result<Void, Error>) -> Void] = []
@@ -206,9 +383,7 @@ final class SafeRelayMeshService: NSObject {
     func configureAtLaunch() {
         registerNotificationCategory()
         startCloudReachability()
-        if let packet = latestPacket() {
-            remember(packet)
-        }
+        restoreRelayState()
         logger.notice("Starting always-on mesh service at launch")
         start()
         flushCloudOutbox()
@@ -216,6 +391,7 @@ final class SafeRelayMeshService: NSObject {
 
     func start(completion: ((Result<Void, Error>) -> Void)? = nil) {
         defaults.set(true, forKey: enabledKey)
+        restoreRelayState()
         if let completion {
             startCompletions.append(completion)
         }
@@ -246,17 +422,17 @@ final class SafeRelayMeshService: NSObject {
     }
 
     func publish(_ data: Data) throws {
-        guard MeshPacket.isValid(data) else {
+        guard MeshPacket.isFresh(data) else {
             throw NSError(
                 domain: "SafeRelayMesh",
                 code: 1,
                 userInfo: [
                     NSLocalizedDescriptionKey:
-                        "Packet must be a valid 21- or 25-byte SafeRelay frame."
+                        "Packet must be a fresh, valid 21-, 25-, or 27-byte SafeRelay frame."
                 ]
             )
         }
-        defaults.set(data, forKey: packetKey)
+        enqueueRelayFrame(data)
         remember(data)
         queueCloudUpload(data, rssi: -127)
         relay(data, excluding: nil)
@@ -299,7 +475,7 @@ final class SafeRelayMeshService: NSObject {
             let content = UNMutableNotificationContent()
             content.title = "SafeRelay alerts are working"
             content.body = "This device can show incoming distress notifications."
-            content.sound = .default
+            content.sound = UNNotificationSound(named: signalSoundName)
             content.interruptionLevel = .active
             content.threadIdentifier = "saferelay-distress"
             content.categoryIdentifier = distressNotificationCategory
@@ -326,6 +502,14 @@ final class SafeRelayMeshService: NSObject {
                 options: [CBCentralManagerScanOptionAllowDuplicatesKey: false]
             )
             logger.notice("Scanning for SafeRelay service")
+        }
+        if centralManager?.state == .poweredOn {
+            let disconnectedPeers = connectedPeripherals.values.filter {
+                $0.state == .disconnected
+            }
+            for peripheral in disconnectedPeers {
+                scheduleReconnect(peripheral, immediate: true)
+            }
         }
 
         guard peripheralManager?.state == .poweredOn else {
@@ -391,14 +575,80 @@ final class SafeRelayMeshService: NSObject {
     }
 
     private func latestPacket() -> Data? {
-        defaults.data(forKey: packetKey)
+        if let queued = relayFrames().first {
+            return queued
+        }
+        guard let legacy = defaults.data(forKey: packetKey),
+              MeshPacket.isFresh(legacy) else {
+            return nil
+        }
+        return legacy
+    }
+
+    private func restoreRelayState() {
+        guard !relayStateRestored else { return }
+        relayStateRestored = true
+
+        let cutoff = Date().addingTimeInterval(-MeshPacket.maxAge)
+        let storedSeen = defaults.dictionary(forKey: seenPacketsKey) ?? [:]
+        seenPackets = storedSeen.reduce(into: [:]) { result, entry in
+            guard let timestamp = entry.value as? NSNumber else { return }
+            let date = Date(timeIntervalSince1970: timestamp.doubleValue)
+            if date > cutoff {
+                result[entry.key] = date
+            }
+        }
+
+        let legacyLatest = defaults.data(forKey: packetKey)
+        var frames = relayFrames()
+        if frames.isEmpty,
+           let legacyLatest,
+           MeshPacket.isFresh(legacyLatest) {
+            frames = [legacyLatest]
+            saveRelayFrames(frames)
+        }
+        frames.forEach(remember)
+    }
+
+    private func relayFrames() -> [Data] {
+        let stored = defaults.array(forKey: relayQueueKey) as? [Data] ?? []
+        let normalized = Array(MeshPacket.orderedForRelay(stored).prefix(100))
+        if normalized != stored {
+            saveRelayFrames(normalized)
+        }
+        return normalized
+    }
+
+    private func saveRelayFrames(_ frames: [Data]) {
+        let bounded = Array(MeshPacket.orderedForRelay(frames).prefix(100))
+        defaults.set(bounded, forKey: relayQueueKey)
+        if let latest = bounded.first {
+            defaults.set(latest, forKey: packetKey)
+        } else {
+            defaults.removeObject(forKey: packetKey)
+        }
+    }
+
+    private func enqueueRelayFrame(_ data: Data) {
+        guard let key = MeshPacket.key(data), MeshPacket.isFresh(data) else { return }
+        var frames = relayFrames().filter { MeshPacket.key($0) != key }
+        frames.append(data)
+        saveRelayFrames(frames)
     }
 
     private func remember(_ data: Data) {
         guard let key = MeshPacket.key(data) else { return }
-        let cutoff = Date().addingTimeInterval(-3600)
+        let cutoff = Date().addingTimeInterval(-MeshPacket.maxAge)
         seenPackets = seenPackets.filter { $0.value > cutoff }
         seenPackets[key] = Date()
+        if seenPackets.count > 500 {
+            let newest = seenPackets.sorted { $0.value > $1.value }.prefix(500)
+            seenPackets = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
+        }
+        defaults.set(
+            seenPackets.mapValues(\.timeIntervalSince1970),
+            forKey: seenPacketsKey
+        )
     }
 
     private func acceptIncoming(
@@ -407,14 +657,13 @@ final class SafeRelayMeshService: NSObject {
         source: String,
         excluding sourcePeripheral: CBPeripheral?
     ) {
-        guard let key = MeshPacket.key(data) else {
+        guard let key = MeshPacket.key(data), MeshPacket.isFresh(data) else {
             logger.error("Rejected malformed packet from \(source, privacy: .public)")
             return
         }
         guard seenPackets[key] == nil else { return }
 
         remember(data)
-        defaults.set(data, forKey: packetKey)
         let event = MeshPacketEvent(bytes: Array(data), rssi: rssi, source: source)
         if let eventHandler {
             eventHandler(event)
@@ -426,25 +675,118 @@ final class SafeRelayMeshService: NSObject {
         }
         scheduleNotification(for: data)
         queueCloudUpload(data, rssi: rssi)
-        relay(data, excluding: sourcePeripheral)
+        if let forwarded = MeshPacket.forwarded(data) {
+            enqueueRelayFrame(forwarded)
+            relay(forwarded, excluding: sourcePeripheral)
+        }
         logger.notice("Received packet \(key, privacy: .public) via \(source, privacy: .public)")
     }
 
     private func relay(_ data: Data, excluding sourcePeripheral: CBPeripheral?) {
         if let localPacketCharacteristic {
-            _ = peripheralManager?.updateValue(
+            let delivered = peripheralManager?.updateValue(
                 data,
                 for: localPacketCharacteristic,
                 onSubscribedCentrals: nil
-            )
+            ) ?? false
+            if !delivered {
+                enqueueNotification(data)
+            }
         }
         for peripheral in connectedPeripherals.values
         where peripheral !== sourcePeripheral && peripheral.state == .connected {
-            guard let characteristic = remotePacketCharacteristic(on: peripheral),
-                  peripheral.canSendWriteWithoutResponse else {
-                continue
+            enqueueWrite(data, to: peripheral)
+        }
+    }
+
+    private func enqueueWrite(_ data: Data, to peripheral: CBPeripheral) {
+        let identifier = peripheral.identifier
+        var queued = pendingWrites[identifier] ?? []
+        let packetKey = MeshPacket.key(data)
+        let inFlightKey = inFlightWrites[identifier].flatMap {
+            MeshPacket.key($0.data)
+        }
+        guard MeshPacket.isFresh(data),
+              !queued.contains(where: { MeshPacket.key($0.data) == packetKey }),
+              inFlightKey != packetKey else {
+            return
+        }
+        let sender = MeshPacket.senderID(data)
+        queued.removeAll { MeshPacket.senderID($0.data) == sender }
+        queued.append(PendingPeerWrite(data: data))
+        queued.sort { MeshPacket.relayComesBefore($0.data, $1.data) }
+        queued = Array(queued.prefix(100))
+        pendingWrites[identifier] = queued
+        drainWrites(to: peripheral)
+    }
+
+    private func enqueueRelayFrames(to peripheral: CBPeripheral) {
+        for frame in relayFrames() {
+            enqueueWrite(frame, to: peripheral)
+        }
+    }
+
+    private func drainWrites(to peripheral: CBPeripheral) {
+        let identifier = peripheral.identifier
+        guard peripheral.state == .connected,
+              inFlightWrites[identifier] == nil,
+              let characteristic = remotePacketCharacteristic(on: peripheral) else {
+            return
+        }
+        var queued = pendingWrites[peripheral.identifier] ?? []
+        guard !queued.isEmpty else { return }
+
+        let write = queued.removeFirst()
+        pendingWrites[identifier] = queued
+        if characteristic.properties.contains(.write) {
+            inFlightWrites[identifier] = write
+            peripheral.writeValue(write.data, for: characteristic, type: .withResponse)
+        } else {
+            queued.insert(write, at: 0)
+            pendingWrites[identifier] = queued
+            logger.error("Peer does not expose acknowledged packet writes")
+        }
+    }
+
+    private func enqueueNotification(_ data: Data) {
+        guard let key = MeshPacket.key(data),
+              !pendingNotifications.contains(where: { MeshPacket.key($0) == key }) else {
+            return
+        }
+        pendingNotifications.append(data)
+        pendingNotifications = Array(
+            MeshPacket.orderedForRelay(pendingNotifications).prefix(100)
+        )
+    }
+
+    private func drainNotifications() {
+        guard let localPacketCharacteristic else { return }
+        while let data = pendingNotifications.first {
+            let delivered = peripheralManager?.updateValue(
+                data,
+                for: localPacketCharacteristic,
+                onSubscribedCentrals: nil
+            ) ?? false
+            if !delivered { return }
+            pendingNotifications.removeFirst()
+        }
+    }
+
+    private func replayRelayFrames(to central: CBCentral) {
+        guard let localPacketCharacteristic else { return }
+        let frames = relayFrames()
+        for (index, frame) in frames.enumerated() {
+            let delivered = peripheralManager?.updateValue(
+                frame,
+                for: localPacketCharacteristic,
+                onSubscribedCentrals: [central]
+            ) ?? false
+            if !delivered {
+                for pending in frames[index...] {
+                    enqueueNotification(pending)
+                }
+                return
             }
-            peripheral.writeValue(data, for: characteristic, type: .withoutResponse)
         }
     }
 
@@ -469,14 +811,51 @@ final class SafeRelayMeshService: NSObject {
                 options: [
                     CBConnectPeripheralOptionNotifyOnConnectionKey: true,
                     CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
+                    CBConnectPeripheralOptionEnableAutoReconnect: true,
                 ]
             )
+        }
+    }
+
+    private func scheduleReconnect(
+        _ peripheral: CBPeripheral,
+        immediate: Bool = false
+    ) {
+        let identifier = peripheral.identifier
+        guard isEnabled, reconnectScheduled.insert(identifier).inserted else { return }
+        let delay: TimeInterval
+        if immediate {
+            delay = 0
+        } else {
+            let failures = min(6, (connectionFailures[identifier] ?? 0) + 1)
+            connectionFailures[identifier] = failures
+            delay = min(30.0, pow(2.0, Double(failures - 1)))
+        }
+        connectedPeripherals[identifier] = peripheral
+        logger.notice(
+            "Peer reconnect scheduled in \(delay, privacy: .public) seconds"
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak peripheral] in
+            guard let self else { return }
+            reconnectScheduled.remove(identifier)
+            guard isEnabled,
+                  centralManager?.state == .poweredOn,
+                  let peripheral,
+                  peripheral.state == .disconnected else {
+                return
+            }
+            configure(peripheral)
         }
     }
 
     private func scheduleNotification(for data: Data) {
         guard let content = MeshPacket.notificationContent(data),
               let key = MeshPacket.key(data) else {
+            return
+        }
+        if UIApplication.shared.applicationState == .active {
+            SafeRelayAlertSoundPlayer.shared.play()
+            logger.notice("Played in-app alert sound for \(key, privacy: .public)")
             return
         }
         content.threadIdentifier = "saferelay-distress"
@@ -775,6 +1154,10 @@ extension SafeRelayMeshService: CBCentralManagerDelegate {
         rssi RSSI: NSNumber
     ) {
         guard connectedPeripherals[peripheral.identifier] == nil else { return }
+        guard connectedPeripherals.count < maxTrackedPeers else {
+            logger.warning("Peer limit reached; ignoring additional discovery")
+            return
+        }
         configure(peripheral)
         logger.notice(
             "Discovered peer \(peripheral.identifier.uuidString, privacy: .public) at \(RSSI.intValue) dBm"
@@ -782,6 +1165,8 @@ extension SafeRelayMeshService: CBCentralManagerDelegate {
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        connectionFailures.removeValue(forKey: peripheral.identifier)
+        reconnectScheduled.remove(peripheral.identifier)
         configure(peripheral)
         logger.notice("Connected peer \(peripheral.identifier.uuidString, privacy: .public)")
     }
@@ -791,10 +1176,12 @@ extension SafeRelayMeshService: CBCentralManagerDelegate {
         didFailToConnect peripheral: CBPeripheral,
         error: Error?
     ) {
-        connectedPeripherals.removeValue(forKey: peripheral.identifier)
+        pendingWrites.removeValue(forKey: peripheral.identifier)
+        inFlightWrites.removeValue(forKey: peripheral.identifier)
         logger.error(
             "Peer connection failed: \(error?.localizedDescription ?? "unknown", privacy: .public)"
         )
+        scheduleReconnect(peripheral)
     }
 
     func centralManager(
@@ -806,18 +1193,15 @@ extension SafeRelayMeshService: CBCentralManagerDelegate {
     ) {
         guard isEnabled else {
             connectedPeripherals.removeValue(forKey: peripheral.identifier)
+            pendingWrites.removeValue(forKey: peripheral.identifier)
+            inFlightWrites.removeValue(forKey: peripheral.identifier)
+            reconnectScheduled.remove(peripheral.identifier)
             return
         }
-        peripheral.delegate = self
-        connectedPeripherals[peripheral.identifier] = peripheral
-        central.connect(
-            peripheral,
-            options: [
-                CBConnectPeripheralOptionNotifyOnConnectionKey: true,
-                CBConnectPeripheralOptionNotifyOnDisconnectionKey: true,
-            ]
-        )
-        logger.notice("Peer disconnected; reconnect requested")
+        pendingWrites.removeValue(forKey: peripheral.identifier)
+        inFlightWrites.removeValue(forKey: peripheral.identifier)
+        scheduleReconnect(peripheral, immediate: true)
+        logger.notice("Peer disconnected; reconnect queued")
     }
 }
 
@@ -827,6 +1211,7 @@ extension SafeRelayMeshService: CBPeripheralDelegate {
             logger.error(
                 "Service discovery failed: \(error!.localizedDescription, privacy: .public)"
             )
+            centralManager?.cancelPeripheralConnection(peripheral)
             return
         }
         for service in peripheral.services ?? [] where service.uuid == meshServiceUUID {
@@ -846,13 +1231,12 @@ extension SafeRelayMeshService: CBPeripheralDelegate {
             logger.error(
                 "Characteristic discovery failed: \(error?.localizedDescription ?? "missing packet characteristic", privacy: .public)"
             )
+            centralManager?.cancelPeripheralConnection(peripheral)
             return
         }
         peripheral.setNotifyValue(true, for: characteristic)
         peripheral.readValue(for: characteristic)
-        if let packet = latestPacket(), peripheral.canSendWriteWithoutResponse {
-            peripheral.writeValue(packet, for: characteristic, type: .withoutResponse)
-        }
+        enqueueRelayFrames(to: peripheral)
     }
 
     func peripheral(
@@ -868,6 +1252,68 @@ extension SafeRelayMeshService: CBPeripheralDelegate {
             excluding: peripheral
         )
     }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        guard characteristic.uuid == meshPacketUUID,
+              var write = inFlightWrites.removeValue(
+                forKey: peripheral.identifier
+              ) else {
+            return
+        }
+
+        if let error {
+            write.attempts += 1
+            if write.attempts < 3, peripheral.state == .connected {
+                var queued = pendingWrites[peripheral.identifier] ?? []
+                let sender = MeshPacket.senderID(write.data)
+                if queued.contains(where: {
+                    MeshPacket.senderID($0.data) == sender
+                }) {
+                    pendingWrites[peripheral.identifier] = queued
+                    drainWrites(to: peripheral)
+                    return
+                }
+                queued.append(write)
+                queued.sort {
+                    MeshPacket.relayComesBefore($0.data, $1.data)
+                }
+                pendingWrites[peripheral.identifier] = queued
+                let delay = 0.4 * Double(write.attempts)
+                logger.warning(
+                    "Peer write was not acknowledged; retry \(write.attempts, privacy: .public)"
+                )
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak peripheral] in
+                    guard let self, let peripheral else { return }
+                    drainWrites(to: peripheral)
+                }
+            } else {
+                logger.error(
+                    "Peer write failed after retries: \(error.localizedDescription, privacy: .public)"
+                )
+                centralManager?.cancelPeripheralConnection(peripheral)
+            }
+            return
+        }
+
+        drainWrites(to: peripheral)
+    }
+
+    func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateNotificationStateFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        guard characteristic.uuid == meshPacketUUID, error != nil else { return }
+        logger.error(
+            "Peer notification subscription failed: \(error?.localizedDescription ?? "unknown", privacy: .public)"
+        )
+        centralManager?.cancelPeripheralConnection(peripheral)
+    }
+
 }
 
 extension SafeRelayMeshService: CBPeripheralManagerDelegate {
@@ -921,6 +1367,22 @@ extension SafeRelayMeshService: CBPeripheralManagerDelegate {
         }
     }
 
+    func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager) {
+        drainNotifications()
+    }
+
+    func peripheralManager(
+        _ peripheral: CBPeripheralManager,
+        central: CBCentral,
+        didSubscribeTo characteristic: CBCharacteristic
+    ) {
+        guard characteristic.uuid == meshPacketUUID else { return }
+        replayRelayFrames(to: central)
+        logger.notice(
+            "Replayed relay queue to subscribed central \(central.identifier.uuidString, privacy: .public)"
+        )
+    }
+
     func peripheralManager(
         _ peripheral: CBPeripheralManager,
         didReceiveRead request: CBATTRequest
@@ -945,7 +1407,7 @@ extension SafeRelayMeshService: CBPeripheralManagerDelegate {
         for request in requests {
             guard request.characteristic.uuid == meshPacketUUID,
                   let data = request.value,
-                  MeshPacket.isValid(data) else {
+                  MeshPacket.isFresh(data) else {
                 if request.characteristic.properties.contains(.write) {
                     peripheral.respond(to: request, withResult: .invalidAttributeValueLength)
                 }
@@ -1026,6 +1488,7 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "publish", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "drain", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "testNotification", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "presentIncident", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "startCompass", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "stopCompass", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cloudPost", returnType: CAPPluginReturnPromise),
@@ -1124,6 +1587,13 @@ public final class SafeRelayNativeMeshPlugin: CAPPlugin, CAPBridgedPlugin {
                     call.reject(error.localizedDescription)
                 }
             }
+        }
+    }
+
+    @objc func presentIncident(_ call: CAPPluginCall) {
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .safeRelayPresentIncident, object: nil)
+            call.resolve()
         }
     }
 

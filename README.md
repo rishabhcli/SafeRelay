@@ -23,6 +23,7 @@ the platform bridges and entitlements that Capacitor cannot express directly.
 flowchart LR
     PERSON["Person in distress"] --> PHONE_A["SafeRelay field app"]
     PHONE_A -->|"Always-on Bluetooth relay"| PHONE_B["Nearby SafeRelay device"]
+    PHONE_B -->|"Store and forward, hop 1"| PHONE_C["Farther SafeRelay device"]
     PHONE_A -->|"Automatic upload when reachable"| CLOUD["Jac cloud relay"]
     PHONE_B -->|"Store, forward, and upload when reachable"| CLOUD
     CLOUD --> CONSOLE["SafeRelay operations console"]
@@ -84,6 +85,8 @@ The native radio path must be validated on two physical,
 Apple Intelligence-capable iPhones. A browser preview, simulator, successful
 build, or passing protocol tests does not prove Bluetooth scanning,
 advertising, background continuity, or phone-to-phone delivery.
+End-to-end multi-hop claims additionally require three physical iPhones with
+the two endpoint phones independently confirmed outside direct radio range.
 
 ## Repository Layout
 

@@ -7,7 +7,7 @@ is not treated as physical end-to-end proof.
 
 | Former Flutter behavior | Jac/Capacitor implementation | Status |
 | --- | --- | --- |
-| 25-byte SOS packet and 21-byte legacy decode | `domain/protocol*.jac` | Built; codec tests pass |
+| 27-byte versioned SOS packet plus 21/25-byte legacy decode | `domain/protocol*.jac` | Built; codec tests pass |
 | Sender sequence, expiry, replay, targeting, and deduplication | Protocol and operational domain modules | Built; Jac tests pass |
 | BLE central scan and GATT peripheral advertising | `services/mesh.cl.jac` with Capgo BLE | Built; both roles start in Android emulator |
 | Store-and-forward relay and battery policy | Jac protocol policy and packet store | Built; policy tests pass |

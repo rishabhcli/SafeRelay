@@ -1,8 +1,10 @@
 """SafeRelay wire protocol and offline mesh policy."""
 
 glob PACKET_HEADER: int = 65535;
-glob PACKET_SIZE: int = 25;
+glob PACKET_SIZE: int = 27;
+glob UNVERSIONED_PACKET_SIZE: int = 25;
 glob LEGACY_PACKET_SIZE: int = 21;
+glob PACKET_VERSION: int = 1;
 glob MAX_PACKET_AGE_SECONDS: int = 86400;
 glob MAX_RELAY_HOPS: int = 5;
 
@@ -138,6 +140,16 @@ def validate_status(code: int) {
 }
 
 
+def validate_coordinates(latitude_e7: int, longitude_e7: int) {
+    if latitude_e7 < -900000000 or latitude_e7 > 900000000 {
+        raise ValueError("SafeRelay packet latitude is outside valid bounds");
+    }
+    if longitude_e7 < -1800000000 or longitude_e7 > 1800000000 {
+        raise ValueError("SafeRelay packet longitude is outside valid bounds");
+    }
+}
+
+
 def _byte(value: int, shift: int) -> int {
     return (value >> shift) & 255;
 }
@@ -145,6 +157,10 @@ def _byte(value: int, shift: int) -> int {
 
 def:pub packet_to_bytes(packet: SosPacket) -> list[int] {
     validate_status(packet.status_code);
+    validate_coordinates(packet.latitude_e7, packet.longitude_e7);
+    if packet.relay_hops < 0 or packet.relay_hops > MAX_RELAY_HOPS {
+        raise ValueError("SafeRelay packet exceeds relay hop limit");
+    }
     return [
         255,
         255,
@@ -170,7 +186,9 @@ def:pub packet_to_bytes(packet: SosPacket) -> list[int] {
         _byte(packet.target_id, 24),
         _byte(packet.target_id, 16),
         _byte(packet.target_id, 8),
-        _byte(packet.target_id, 0)
+        _byte(packet.target_id, 0),
+        PACKET_VERSION,
+        packet.relay_hops
     ];
 }
 
@@ -197,15 +215,26 @@ def _i32(bytes: list[int], offset: int) -> int {
 
 
 def:pub packet_from_bytes(bytes: list[int], rssi: int = -127) -> SosPacket {
-    if len(bytes) != LEGACY_PACKET_SIZE and len(bytes) != PACKET_SIZE {
+    if (
+        len(bytes) != LEGACY_PACKET_SIZE
+        and len(bytes) != UNVERSIONED_PACKET_SIZE
+        and len(bytes) != PACKET_SIZE
+    ) {
         raise ValueError(
-            "Invalid packet size: " + str(len(bytes)) + ", expected 21 or 25"
+            "Invalid packet size: " + str(len(bytes)) + ", expected 21, 25, or 27"
         );
     }
     if _u16(bytes, 0) != PACKET_HEADER {
         raise ValueError("Invalid SafeRelay packet header");
     }
     validate_status(bytes[16]);
+    validate_coordinates(_i32(bytes, 8), _i32(bytes, 12));
+    if len(bytes) == PACKET_SIZE and bytes[25] != PACKET_VERSION {
+        raise ValueError("Unsupported SafeRelay packet version");
+    }
+    if len(bytes) == PACKET_SIZE and bytes[26] > MAX_RELAY_HOPS {
+        raise ValueError("SafeRelay packet exceeds relay hop limit");
+    }
     return SosPacket(
         user_id=_u32(bytes, 2),
         sequence=_u16(bytes, 6),
@@ -213,8 +242,9 @@ def:pub packet_from_bytes(bytes: list[int], rssi: int = -127) -> SosPacket {
         longitude_e7=_i32(bytes, 12),
         status_code=bytes[16],
         timestamp=_u32(bytes, 17),
-        target_id=_u32(bytes, 21) if len(bytes) == PACKET_SIZE else 0,
-        rssi=rssi
+        target_id=_u32(bytes, 21) if len(bytes) >= UNVERSIONED_PACKET_SIZE else 0,
+        rssi=rssi,
+        relay_hops=bytes[26] if len(bytes) == PACKET_SIZE else 0
     );
 }
 
@@ -294,7 +324,7 @@ def:pub evaluate_relay(
             unknowns=unknowns
         );
     }
-    if packet.relay_hops >= MAX_RELAY_HOPS and status_priority(packet.status_code) < 3 {
+    if packet.relay_hops >= MAX_RELAY_HOPS {
         return RelayResult(
             decision="drop",
             reason="Relay hop limit reached",

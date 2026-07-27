@@ -79,6 +79,7 @@ import from ..services.mesh {
     native_platform,
     notify_incoming,
     open_native_settings,
+    present_native_incident,
     publish_packet,
     publish_packet_state,
     register_app_state_observer,
@@ -224,7 +225,7 @@ def:pub AppShell -> JsxElement {
     has alert_nonce: int = 0;
     has distress_notice_id: str = "";
     has distress_notice_timer: Ref[any] = Ref(None);  # jac:ignore[W1037]
-    has map_focus_packet_id: str = "";
+    has map_focus: dict[str, object] = {"packetId": "", "nonce": 0};
     has busy: bool = False;
     has activity_log: list[str] = [];
     has sync_attempts: list[dict[str, object]] = [];
@@ -249,7 +250,6 @@ def:pub AppShell -> JsxElement {
     has heading: float = 0.0;
     has heading_accuracy: float = -1.0;
     has compass_active: bool = False;
-    has compass_status: str = "Compass starts automatically when selected.";
     has strobe_timer: Ref[any] = Ref(None);  # jac:ignore[W1037]
     has strobe_phase: Ref[bool] = Ref(False);
 
@@ -307,10 +307,7 @@ def:pub AppShell -> JsxElement {
             append_log("Generated a local survival-guide reply.");
         } else {
             survival_chat = survival_chat[:-1];
-            show_alert(
-                "Survival Guide unavailable: " + result.availability,
-                "warning"
-            );
+            append_log("Survival Guide unavailable: " + result.availability);
         }
         survival_sending = False;
     }
@@ -322,9 +319,8 @@ def:pub AppShell -> JsxElement {
                 raise RuntimeError("Clipboard unavailable");
             }
             await clipboard.writeText(content);
-            show_alert("Guide reply copied.", "neutral");
         } except Exception {
-            show_alert("Could not copy the guide reply.", "warning");
+            append_log("Could not copy the guide reply.");
         }
     }
 
@@ -332,7 +328,6 @@ def:pub AppShell -> JsxElement {
         await clear_survival_chat_history();
         survival_chat = [];
         survival_input = "";
-        show_alert("Local Survival Guide history cleared.", "neutral");
     }
 
     def append_log(message: str) {
@@ -340,7 +335,7 @@ def:pub AppShell -> JsxElement {
     }
 
     def show_alert(message: str, tone: str) {
-        if tone != "warning" and tone != "danger" { return; }
+        if tone != "danger" { return; }
         alert_message = message;
         alert_tone = tone;
         alert_dismissing = False;
@@ -373,14 +368,18 @@ def:pub AppShell -> JsxElement {
         }, 8000);
     }
 
-    def view_distress_notice(packet_id: str) {
+    async def view_distress_notice(packet_id: str) {
         if distress_notice_timer.current {
             clearTimeout(distress_notice_timer.current);
             distress_notice_timer.current = None;
         }
         distress_notice_id = "";
-        map_focus_packet_id = packet_id;
+        map_focus = {
+            "packetId": packet_id,
+            "nonce": int(map_focus["nonce"]) + 1,
+        };
         active_tab = "map";
+        await present_native_incident();
     }
 
     async def handle_mesh_event(event: any) {  # jac:ignore[W1037]
@@ -408,7 +407,15 @@ def:pub AppShell -> JsxElement {
             return;
         }
         if kind == "notificationAction" {
-            active_tab = "map";
+            notification_data = event["data"] as dict[str, object];
+            action_id = str(notification_data["actionId"]);
+            if action_id == "dismiss" { return; }
+            packet_id = str(notification_data["packetId"]);
+            await view_distress_notice(
+                packet_id
+                if str(notification_data["notificationKind"]) == "mesh-distress"
+                else ""
+            );
             return;
         }
         if kind != "packet" { return; }
@@ -449,7 +456,9 @@ def:pub AppShell -> JsxElement {
                 len(updated)
             );
             append_log(relay.decision.upper() + ": " + relay.reason);
-            if relay.should_relay() {
+            # The iOS native service forwards while the WebView is suspended and
+            # owns hop increments. Other native platforms still republish here.
+            if relay.should_relay() and native_platform() != "ios" {
                 await publish_packet(packet_to_bytes(packet));
             }
             await sync_cloud(False, updated);
@@ -484,12 +493,12 @@ def:pub AppShell -> JsxElement {
             location_accuracy = fix.accuracy;
             location_message = fix.message;
             if not fix.ready {
-                show_alert(fix.message, "warning");
+                append_log(fix.message);
             }
         } except Exception as error {
             location_ready = False;
             location_message = "Location failed: " + str(error);
-            show_alert(location_message, "warning");
+            append_log(location_message);
         } finally {
             busy = False;
         }
@@ -629,10 +638,7 @@ def:pub AppShell -> JsxElement {
                     + " SafeRelay will retain the packet for retry."
                 );
             }
-            show_alert(
-                distress_message,
-                "success" if stopping else "danger"
-            );
+            show_alert(distress_message, "danger");
             append_log(
                 status_label(status_to_send)
                 + " "
@@ -723,21 +729,15 @@ def:pub AppShell -> JsxElement {
         if show_notifications and notification_permission != "granted" {
             state = await request_notification_permission();
             notification_permission = state.permission;
-            show_alert(
-                state.message,
-                "success" if state.permission == "granted" else "warning"
-            );
+            if state.permission != "granted" {
+                append_log(state.message);
+            }
         }
     }
 
     async def clear_offline_map_cache {
-        cleared = await clear_cached_map_region();
+        await clear_cached_map_region();
         offline_tiles = 0;
-        show_alert(
-            "Offline map cache cleared." if cleared
-            else "No offline map cache was stored.",
-            "neutral"
-        );
     }
 
     async def redo_onboarding {
@@ -750,51 +750,40 @@ def:pub AppShell -> JsxElement {
         onboarding_done = True;
         notification_state = await request_notification_permission();
         notification_permission = notification_state.permission;
-        show_alert(
-            (
-                "Device setup saved. Bluetooth relay stays active automatically."
-                if notification_state.permission == "granted"
-                else notification_state.message
-            ),
-            (
-                "success"
-                if notification_state.permission == "granted"
-                else "warning"
-            )
-        );
+        if notification_state.permission != "granted" {
+            append_log("Device setup saved, but distress notifications are blocked.");
+        }
     }
 
     async def send_notification_test {
         busy = True;
         result = await test_distress_notification();
         notification_permission = result.permission;
-        show_alert(
-            result.message,
-            "success" if result.scheduled else "warning"
+        preview_distress = active_foreign_distress(
+            packets,
+            user_id,
+            unix_seconds()
         );
+        if len(preview_distress) > 0 {
+            show_distress_notice(preview_distress[0].unique_id());
+        }
         append_log(result.message);
         busy = False;
     }
 
     async def open_background_settings {
         await open_native_settings();
-        show_alert(
-            "Return to SafeRelay after enabling Background App Refresh.",
-            "warning"
-        );
     }
 
     async def erase_packet_history {
         await clear_packets();
         packets = [];
-        show_alert("Local packet history cleared from this device.", "neutral");
     }
 
     async def erase_operational_ledgers {
         await clear_operational_history();
         sync_attempts = [];
         sync_receipts = [];
-        show_alert("Local sync history cleared from this device.", "neutral");
     }
 
     async def refresh_operational_ledgers {
@@ -833,13 +822,6 @@ def:pub AppShell -> JsxElement {
         busy = True;
         result: any = await cache_map_region(latitude, longitude, 13);  # jac:ignore[W1037]
         offline_tiles = int(result["cached"]);
-        show_alert(
-            (
-                str(result["cached"]) + " of " + str(result["total"])
-                + " local map tiles are available offline."
-            ),
-            "success" if offline_tiles > 0 else "warning"
-        );
         busy = False;
     }
 
@@ -895,11 +877,8 @@ def:pub AppShell -> JsxElement {
             await save_packets(pending_packets);
             packets = pending_packets[:];
         }
-        if announce {
-            show_alert(
-                str(result["message"]),
-                "success" if sync_state == "succeeded" or sync_state == "empty" else "warning"
-            );
+        if announce and sync_state not in ["succeeded", "empty"] {
+            show_alert(str(result["message"]), "danger");
         }
         append_log("Cloud sync " + sync_state + ": " + str(result["message"]));
         if announce { busy = False; }
@@ -914,17 +893,10 @@ def:pub AppShell -> JsxElement {
             ultrasonic_log = [
                 ("TX " + str(result["message"])) if bool(result["sent"]) else str(result["message"])
             ] + ultrasonic_log[:5];
-            show_alert(
-                (
-                    "Ultrasonic packet transmitted."
-                    if bool(result["sent"]) else str(result["message"])
-                ),
-                "success" if bool(result["sent"]) else "warning"
-            );
         } except Exception as error {
             message = "Ultrasonic transmitter unavailable: " + str(error);
             ultrasonic_log = [message] + ultrasonic_log[:5];
-            show_alert(message, "warning");
+            append_log(message);
         }
     }
 
@@ -944,26 +916,19 @@ def:pub AppShell -> JsxElement {
             }
         );
         ultrasonic_listening = bool(result["listening"]);
-        show_alert(
-            str(result["message"]),
-            "success" if ultrasonic_listening else "warning"
-        );
     }
 
     async def activate_compass {
         tools_view = "compass";
-        compass_status = "Acquiring magnetic heading...";
         result = await start_compass(
             lambda (event: any) {  # jac:ignore[W1037]
                 heading = float(event["heading"]);
                 heading_accuracy = float(event["accuracy"]);
-                compass_status = "Live magnetic heading";
             }
         );
         compass_active = bool(result["active"]);
-        compass_status = str(result["message"]);
         if not compass_active {
-            show_alert(compass_status, "warning");
+            append_log("Compass unavailable: " + str(result["message"]));
         }
     }
 
@@ -974,7 +939,6 @@ def:pub AppShell -> JsxElement {
         }
         if compass_active {
             compass_active = False;
-            compass_status = "Compass starts automatically when selected.";
             await stop_compass();
         }
         tools_view = tool;
@@ -994,15 +958,11 @@ def:pub AppShell -> JsxElement {
             strobe_phase.current = False;
             strobe_active = False;
             await set_torch(False);
-            show_alert("Visual beacon stopped.", "neutral");
             return;
         }
         enabled = await set_torch(True);
         if not enabled {
-            show_alert(
-                "Torch unavailable. Check camera permission in Settings.",
-                "warning"
-            );
+            append_log("Torch unavailable. Check camera permission in Settings.");
             return;
         }
         strobe_phase.current = True;
@@ -1012,7 +972,6 @@ def:pub AppShell -> JsxElement {
             strobe_phase.current = phase;
             set_torch(phase);
         }, 650);
-        show_alert("Visual beacon active.", "success");
     }
 
     async can with entry {
@@ -1139,7 +1098,6 @@ def:pub AppShell -> JsxElement {
             active_tab != "tools" or tools_view != "compass"
         ) {
             compass_active = False;
-            compass_status = "Compass starts automatically when selected.";
             stop_compass();
         }
     }, [active_tab, tools_view]);
@@ -1325,14 +1283,18 @@ def:pub AppShell -> JsxElement {
                 aria-atomic="true"
             >
                 <span className="distress-presence-icon">
-                    <Siren size={25} />
+                    <Siren size={30} />
+                    <small>LIVE</small>
                 </span>
                 <div className="distress-presence-copy">
-                    <span>SOMEONE ELSE NEEDS HELP</span>
-                    <strong>
-                        {status_label(notice_distress[0].status_code)}
-                        {" · " + status_description(notice_distress[0].status_code)}
-                    </strong>
+                    <div className="distress-presence-kicker">
+                        <span><Radio size={12} /> INCOMING DISTRESS SIGNAL</span>
+                        <span className="distress-presence-audio">
+                            <Volume2 size={12} /> ALARM ACTIVE
+                        </span>
+                    </div>
+                    <strong>{status_label(notice_distress[0].status_code)}</strong>
+                    <p>{status_description(notice_distress[0].status_code)}</p>
                     <small>
                         {"Node " + str(notice_distress[0].user_id)[-6:]
                         + " · " + distress_age_label
@@ -1347,8 +1309,8 @@ def:pub AppShell -> JsxElement {
                     title="View distress reports on map"
                     aria-label="View distress reports on map"
                 >
-                    <MapPin size={20} />
-                    <span>VIEW</span>
+                    <MapPin size={24} />
+                    <span>OPEN MAP</span>
                 </button>
             </section>
         }}
@@ -1378,7 +1340,9 @@ def:pub AppShell -> JsxElement {
                     aria-label="Dismiss alert"
                     title="Dismiss alert"
                     onClick={dismiss_alert}
-                ><X size={17} /></button>
+                >
+                    <X size={17} />
+                </button>
             </div>
         }}
 
@@ -1449,7 +1413,7 @@ def:pub AppShell -> JsxElement {
                         location_ready={location_ready}
                         location_message={location_message}
                         on_locate={refresh_location}
-                        focus_packet_id={map_focus_packet_id}
+                        focus={map_focus}
                     />
                 </div>
             }}
@@ -1497,10 +1461,6 @@ def:pub AppShell -> JsxElement {
                         <span className="compass-lubber"></span>
                     </div>
                     <div className="compass-meta" aria-live="polite">
-                        <div>
-                            <span>STATUS</span>
-                            <strong>{compass_status}</strong>
-                        </div>
                         <div>
                             <span>ACCURACY</span>
                             <strong>{compass_accuracy_label}</strong>
@@ -1995,7 +1955,7 @@ def:pub AppShell -> JsxElement {
                         <span className="settings-icon safe"><Check size={19} /></span>
                         <div><strong>Version</strong><small>{plugin_version}</small></div>
                     </div>
-                    <button id="settings-how-it-works" className="settings-row settings-row-button" onClick={lambda { show_alert("SafeRelay keeps Bluetooth relay active, stores every packet locally, and uploads every unsynced signal whenever the Jac cloud relay is reachable.", "neutral"); }}>
+                    <button id="settings-how-it-works" className="settings-row settings-row-button" onClick={lambda { append_log("SafeRelay keeps Bluetooth relay active, stores every packet locally, and uploads every unsynced signal whenever the Jac cloud relay is reachable."); }}>
                         <span className="settings-icon"><ShieldCheck size={19} /></span>
                         <div><strong>How it works</strong><small>Review local relay, cloud upload, and receipt boundaries</small></div>
                     </button>

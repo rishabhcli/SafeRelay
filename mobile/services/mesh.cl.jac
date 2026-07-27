@@ -776,14 +776,36 @@ async def:pub register_notification_observers {
     await LocalNotifications.addListener(
         "localNotificationActionPerformed",
         lambda (event: any) {  # jac:ignore[W1037]
+            notification: any = event.notification;  # jac:ignore[W1037]
+            extra: any = notification.extra if notification else None;  # jac:ignore[W1037]
+            packet_id = str(extra.packetId or "") if extra else "";
+            if (
+                extra
+                and not packet_id
+                and extra.userId is not None
+                and extra.sequence is not None
+            ) {
+                packet_id = str(extra.userId) + "_" + str(extra.sequence);
+            }
             _emit(
                 "notificationAction",
                 "Opened a SafeRelay notification",
-                {"actionId": str(event.actionId or "tap")}
+                {
+                    "actionId": str(event.actionId or "tap"),
+                    "notificationKind": str(extra.kind or "") if extra else "",
+                    "packetId": packet_id,
+                }
             );
         }
     );
     _notification_listeners_ready = True;
+}
+
+
+async def:pub present_native_incident {
+    if not is_native() or native_platform() != "ios" { return; }
+    try { await NativeMesh.presentIncident(); }
+    except Exception {}
 }
 
 

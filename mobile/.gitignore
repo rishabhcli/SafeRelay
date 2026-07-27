@@ -14,7 +14,7 @@ android/.gradle/
 android/app/build/
 android/build/
 android/local.properties
-ios/App/DerivedData/
+ios/App/DerivedData*/
 ios/App/build/
 ios/App/Pods/
 ios/App/App.xcworkspace/xcuserdata/

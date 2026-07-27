@@ -27,15 +27,15 @@ def fixture(status: int = 2) -> SosPacket {
 }
 
 
-test "current packet round trips all 25 bytes" {
+test "current packet round trips all 27 bytes" {
     packet = fixture();
     bytes = packet_to_bytes(packet);
     decoded = packet_from_bytes(bytes, -67);
 
-    assert len(bytes) == 25;
+    assert len(bytes) == 27;
     assert bytes == [
         255, 255, 18, 52, 86, 120, 0, 42, 22, 131, 254, 8, 183,
-        8, 72, 48, 2, 106, 7, 245, 32, 1, 2, 3, 4
+        8, 72, 48, 2, 106, 7, 245, 32, 1, 2, 3, 4, 1, 0
     ];
     assert decoded.user_id == packet.user_id;
     assert decoded.sequence == packet.sequence;
@@ -45,6 +45,7 @@ test "current packet round trips all 25 bytes" {
     assert decoded.timestamp == packet.timestamp;
     assert decoded.target_id == packet.target_id;
     assert decoded.rssi == -67;
+    assert decoded.relay_hops == 0;
 }
 
 
@@ -75,12 +76,50 @@ test "legacy 21 byte packet defaults to broadcast target" {
 }
 
 
+test "unversioned 25 byte packet remains compatible" {
+    current = packet_to_bytes(fixture(1));
+    unversioned = current[:25];
+    decoded = packet_from_bytes(unversioned);
+    assert len(unversioned) == 25;
+    assert decoded.target_id == 16909060;
+    assert decoded.relay_hops == 0;
+}
+
+
+test "relay hop count round trips in versioned frame" {
+    packet = fixture(1);
+    packet.relay_hops = 3;
+    decoded = packet_from_bytes(packet_to_bytes(packet));
+    assert decoded.relay_hops == 3;
+}
+
+
 test "malformed packet header is rejected" {
     bytes = packet_to_bytes(fixture());
     bytes[0] = 18;
     try {
         packet_from_bytes(bytes);
         assert False, "invalid header should raise";
+    } except ValueError {
+        assert True;
+    }
+}
+
+
+test "unsupported version and excessive hop count are rejected" {
+    wrong_version = packet_to_bytes(fixture());
+    wrong_version[25] = 2;
+    excessive_hops = packet_to_bytes(fixture());
+    excessive_hops[26] = 6;
+    try {
+        packet_from_bytes(wrong_version);
+        assert False, "unsupported version should raise";
+    } except ValueError {
+        assert True;
+    }
+    try {
+        packet_from_bytes(excessive_hops);
+        assert False, "excessive hop count should raise";
     } except ValueError {
         assert True;
     }
@@ -187,7 +226,7 @@ test "active foreign distress excludes local safe and expired packets" {
 }
 
 
-test "critical packet survives pressure and battery saver" {
+test "critical packet stops at hard relay hop limit" {
     packet = fixture(1);
     packet.relay_hops = 5;
     result = evaluate_relay(
@@ -197,7 +236,8 @@ test "critical packet survives pressure and battery saver" {
         "Battery Saver",
         100
     );
-    assert result.decision == "relay";
+    assert result.decision == "drop";
+    assert "hop limit" in result.reason;
 }
 
 

@@ -32,11 +32,14 @@ Their wire constants and algorithms are intentionally kept equivalent.
 3. The BLE plugin creates both a central scanner and a peripheral GATT server.
 4. The central subscribes to the SafeRelay characteristic on discovered peers.
 5. The peripheral advertises the same service and accepts peer writes.
-6. Valid packets enter Jac policy, local persistence, notification, and relay.
-7. Android starts an app-owned foreground service; iOS relies on declared
+6. Valid packets enter native age, duplicate, and hop validation before the
+   native service increments the hop and stores the frame for forwarding.
+7. Jac receives the unmodified observation for policy, local persistence, UI,
+   and cloud reconciliation; iOS does not republish that lower-hop frame.
+8. Android starts an app-owned foreground service; iOS relies on declared
    CoreBluetooth background modes.
-8. USGS, NOAA, and GDACS data is cached locally.
-9. Every locally created or received signal attempts the configured JacHammer
+9. USGS, NOAA, and GDACS data is cached locally.
+10. Every locally created or received signal attempts the configured JacHammer
    cloud endpoint; unreachable signals stay queued for the next connectivity
    event or periodic probe.
 
@@ -44,6 +47,20 @@ Bluetooth scanning, advertising, and eligible packet forwarding do not depend
 on cloud reachability. Cloud upload does not depend on a privacy-mode switch.
 An upload is marked synced only after a successful Jac server response, and
 even a durable receipt is not presented as responder acknowledgement.
+
+The iOS bridge retains the newest fresh frame for up to 100 senders and 500
+packet identities in `UserDefaults`. Both expire with the 24-hour packet window.
+SAFE resolutions and critical reports are ordered ahead of lower-priority
+traffic. Queued frames replay both when SafeRelay connects as a central and when
+a remote central subscribes, so store-and-forward does not depend on which
+phone established the GATT connection.
+
+Central-to-peripheral delivery uses ATT writes with response. One frame is in
+flight per peer, failed acknowledgements receive two bounded retries, and failed
+connections use CoreBluetooth auto-reconnect plus capped exponential backoff.
+Notification and write queues are bounded to 100 frames, tracked peers are
+bounded to 64, and CoreBluetooth readiness callbacks resume flow after radio
+backpressure.
 
 ## Native boundary
 
