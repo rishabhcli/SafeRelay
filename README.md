@@ -112,8 +112,7 @@ incidents.
 
 ## Team
 
-Created by Jerry Wen, Rishabh Bansal, and Aditya Das for the Alameda County
-Hackathon 2025.
+Created by Jerry Wen, Rishabh Bansal, and Aditya Das for JacHacks 2026.
 
 ## License
 
